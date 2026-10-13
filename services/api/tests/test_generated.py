@@ -99,3 +99,11 @@ def test_linked_page_is_already_open_when_the_video_starts():
     scene = build_scene(actions, {"pages": CAPTURE["pages"], "results": {actions[0]["id"]: {"flags": [], "page": "p1"}}}, 15_000)
     assert scene["tracks"]["tab_page"][0] == {"t": 0, "tab": "t0", "page": "p1"}
     assert scene["tracks"]["typing"] == [] and scene["issues"] == []
+
+
+def test_linked_page_mentioned_early_is_open_from_the_first_frame():
+    job = "https://www.google.com/"
+    actions = validate_actions([{"type": "navigate", "at_ms": 2600, "url": job}], 15_000)
+    capture = {"pages": CAPTURE["pages"], "results": {actions[0]["id"]: {"flags": [], "page": "p1"}}}
+    assert build_scene(actions, capture, 15_000, opening_url=job)["tracks"]["tab_page"][0]["page"] == "p1"
+    assert build_scene(actions, capture, 15_000)["tracks"]["typing"]  # without the link it is typed in as said

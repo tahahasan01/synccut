@@ -98,6 +98,7 @@ def build_scene(
     camera: bool = False,
     fps: int = 30,
     clock_ms: float = 0,
+    opening_url: str = "",
 ) -> dict:
     pages = {"start": {"id": "start", "url": "", "title": "New Tab", "image": None, "height": VIEW_H, "status": "start", "favicon": None}}
     for pid, page in capture.get("pages", {}).items():
@@ -153,7 +154,8 @@ def build_scene(
         end = at
         shift = 0.0
 
-        if kind == "navigate" and at <= 400 and not tracks["moves"] and r.get("page") and len(tabs) == 1 and tab["page"] == "start":
+        opens_first = at <= 400 or (opening_url and action["url"] == opening_url)
+        if kind == "navigate" and opens_first and not tracks["moves"] and r.get("page") and len(tabs) == 1 and tab["page"] == "start":
             # The recording opens on this page (e.g. the job post being replied to): already loaded.
             tracks["tab_page"][0] = {"t": 0, "tab": tab["id"], "page": r["page"]}
             tab.update(page=r["page"], scroll=0.0, history=[r["page"]])

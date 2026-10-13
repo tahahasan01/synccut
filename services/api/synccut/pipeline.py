@@ -169,7 +169,8 @@ def scene_for(store: Store, pid: str, project: dict) -> dict | None:
     layout = {**DEFAULT_LAYOUT, **(project.get("layout") or {})}
     scene = build_scene(project.get("actions") or [], capture, project["master"]["probe"]["duration_ms"],
                         camera=bool(layout.get("camera_zoom", False)), fps=settings.fps,
-                        clock_ms=_wall_clock_ms((project.get("capture") or {}).get("captured_at")))
+                        clock_ms=_wall_clock_ms((project.get("capture") or {}).get("captured_at")),
+                        opening_url=project.get("page_url") or "")
     scene["stale"] = not capture_is_current(capture, project.get("actions") or [], page_screenshots(store, pid, project))
     return scene
 

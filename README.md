@@ -8,7 +8,7 @@ You never record your screen.
 
 ![SyncCut home page with the animated demo](docs/images/home.png)
 
-**Demo video (66 s):** [docs/SyncCut-demo.mp4](docs/SyncCut-demo.mp4). Upload, timestamps, AI-planned browser actions, the generated macOS browser in sync, export, then the finished MP4 with sound.
+**Demo video (58 s):** [docs/SyncCut-demo.mp4](docs/SyncCut-demo.mp4). A dummy narration video and a real Upwork jobs page: upload, Whisper timestamps, AI-planned actions, export, then the finished MacBook-style recording with sound.
 
 ---
 
