@@ -42,11 +42,29 @@ COLORS = {
 }
 
 
-def build_skin(screenshot: Path, out_dir: Path) -> dict:
-    """Crop the layers out of `screenshot` into `out_dir`; returns the skin description."""
+DOCK_TOP = 984  # the Dock and the strip around it, in the 1920x1080 screenshot
+
+
+def build_skin(screenshot: Path, out_dir: Path, empty_desktop: Path | None = None) -> dict:
+    """Crop the layers out of `screenshot` into `out_dir`; returns the skin description.
+
+    `empty_desktop` (optional) is a screenshot of the same desktop with no windows: its
+    wallpaper above the Dock fills the Dock's place for videos with the Dock hidden.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     base = out_dir / "desktop.png"
     media.ffmpeg("-i", str(screenshot), "-frames:v", "1", "-vf", "scale=1920:1080:flags=lanczos", str(base), timeout=60)
+    # Dock hidden (like macOS's auto-hide): mirror the wallpaper just above it into its place,
+    # softened, with the seam blurred. Taken from the empty desktop when there is one, since
+    # in `screenshot` a window covers the middle of that strip.
+    band = 1080 - DOCK_TOP
+    source = "[1]scale=1920:1080:flags=lanczos," if empty_desktop else "[0]"
+    inputs = ["-i", str(base)] + (["-i", str(empty_desktop)] if empty_desktop else [])
+    media.ffmpeg(*inputs, "-filter_complex",
+                 f"{source}crop=1920:{band}:0:{DOCK_TOP - band},vflip,gblur=sigma=1.0[b];"
+                 f"[0][b]overlay=0:{DOCK_TOP},format=rgb24,split[o1][o2];"
+                 f"[o2]crop=1920:20:0:{DOCK_TOP - 10},gblur=sigma=4[s];[o1][s]overlay=0:{DOCK_TOP - 10}",
+                 "-frames:v", "1", str(out_dir / "desktop_nodock.png"), timeout=60)
     for name, (x, y, w, h) in CROPS.items():
         media.ffmpeg("-i", str(base), "-frames:v", "1", "-vf", f"crop={w}:{h}:{x}:{y}", str(out_dir / f"{name}.png"), timeout=60)
     skin = {"version": int(time.time()), "window": WINDOW, "crops": CROPS, "colors": COLORS}

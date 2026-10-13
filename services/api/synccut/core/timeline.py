@@ -14,7 +14,8 @@ DEFAULT_LAYOUT = {
     "pip_corner": "bottom-left",
     "pip_width_pct": 0.22,
     "pip_visible": True,
-    "pip_shape": "circle",  # a round camera bubble, like a screen recorder's avatar
+    "pip_shape": "circle",
+    "show_dock": True,  # a round camera bubble, like a screen recorder's avatar
     "camera_zoom": False,
 }
 LEAD_MS = 200

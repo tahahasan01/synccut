@@ -636,6 +636,7 @@ class LayoutPatch(BaseModel):
     pip_width_pct: float | None = Field(None, ge=0.1, le=0.45)
     pip_visible: bool | None = None
     pip_shape: Literal["circle", "rect"] | None = None
+    show_dock: bool | None = None
     camera_zoom: bool | None = None
 
 
@@ -786,7 +787,7 @@ def get_skin() -> dict:
 
 
 @app.post("/api/skin")
-async def upload_skin(file: UploadFile = File(...)) -> dict:
+async def upload_skin(file: UploadFile = File(...), desktop: UploadFile | None = File(None)) -> dict:
     """A full-screen screenshot of the user's Mac with Chrome open on the New Tab page; the
     generated video then shows that exact desktop, Dock, menu bar and Chrome toolbar."""
     from .capture import raster_type
@@ -802,13 +803,20 @@ async def upload_skin(file: UploadFile = File(...)) -> dict:
         info = media.probe(tmp)
         if abs(info["width"] / max(info["height"], 1) - 16 / 9) > 0.03:
             raise HTTPException(422, "Use a full-screen screenshot (16:9, like 1920x1080 or 3840x2160).")
-        build_skin(tmp, SKINS_DIR / "default")
+        empty = None
+        if desktop is not None:
+            extra = await desktop.read(MAX_SHOT_BYTES + 1)
+            if len(extra) <= MAX_SHOT_BYTES and raster_type(extra) in ("png", "jpg", "webp"):
+                empty = SKINS_DIR / "upload_desktop.bin"
+                empty.write_bytes(extra)
+        build_skin(tmp, SKINS_DIR / "default", empty)
     except HTTPException:
         raise
     except Exception:
         raise HTTPException(422, "Couldn't read that screenshot.")
     finally:
         tmp.unlink(missing_ok=True)
+        (SKINS_DIR / "upload_desktop.bin").unlink(missing_ok=True)
     return get_skin()
 
 

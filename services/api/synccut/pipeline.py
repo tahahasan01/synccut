@@ -172,7 +172,8 @@ def scene_for(store: Store, pid: str, project: dict) -> dict | None:
                         camera=bool(layout.get("camera_zoom", False)), fps=settings.fps,
                         clock_ms=_wall_clock_ms((project.get("capture") or {}).get("captured_at")),
                         opening_url=project.get("page_url") or "",
-                        skin=load_skin(settings.data_dir / "skins"))
+                        skin=load_skin(settings.data_dir / "skins"),
+                        dock=bool(layout.get("show_dock", True)))
     scene["stale"] = not capture_is_current(capture, project.get("actions") or [], page_screenshots(store, pid, project))
     return scene
 

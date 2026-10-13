@@ -177,6 +177,10 @@ export function PreviewStep({ project, onChange }: { project: Project; onChange:
                 onPointerUp={() => patch({ pip_width_pct: width })} onKeyUp={() => patch({ pip_width_pct: width })} />
             </label>
             <label className="flex items-start gap-2 text-sm text-ink">
+              <input type="checkbox" className="mt-1" checked={layout.show_dock !== false} onChange={(e) => patch({ show_dock: e.target.checked })} />
+              <span>Show the Dock<span className="block text-xs text-muted">The app bar at the bottom of the Mac. Off looks like an auto-hidden Dock.</span></span>
+            </label>
+            <label className="flex items-start gap-2 text-sm text-ink">
               <input type="checkbox" className="mt-1" checked={layout.camera_zoom === true} onChange={(e) => patch({ camera_zoom: e.target.checked })} />
               <span>Zoom in on each action<span className="block text-xs text-muted">Pushes in on the address bar or link being used. Leave it off for a plain screen recording.</span></span>
             </label>

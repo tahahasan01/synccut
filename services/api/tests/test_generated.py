@@ -172,7 +172,7 @@ def test_skin_is_cut_from_a_screenshot(tmp_path):
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=3840x2160",
                     "-frames:v", "1", str(shot)], check=True)  # a Retina-size screenshot
     build_skin(shot, tmp_path / "skins" / "default")
-    for name in ["desktop", *CROPS]:
+    for name in ["desktop", "desktop_nodock", *CROPS]:
         assert (tmp_path / "skins" / "default" / f"{name}.png").exists()
     skin = load_skin(tmp_path / "skins")
     scene = build_scene(ACTIONS, CAPTURE, 15_000, skin=skin)

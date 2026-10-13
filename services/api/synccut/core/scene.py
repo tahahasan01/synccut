@@ -172,6 +172,7 @@ def build_scene(
     clock_ms: float = 0,
     opening_url: str = "",
     skin: dict | None = None,
+    dock: bool = True,
 ) -> dict:
     pages = {"start": {"id": "start", "url": "", "title": "New Tab", "image": None, "height": VIEW_H, "status": "start", "favicon": None}}
     for pid, page in capture.get("pages", {}).items():
@@ -455,6 +456,7 @@ def build_scene(
         # A real screen recording: the pointer is on screen the whole time.
         "cursor": {"in": -1000, "out": duration_ms + 1000, "start": [CONTENT["x"] + CONTENT["w"] * 0.6, CONTENT["y"] + CONTENT["h"] * 0.55]},
         "clock_ms": clock_ms,
+        "dock": dock,
         # A look cut from the user's own screenshot (skin.py), or None for the drawn one.
         "skin": {"url": skin["url"], "version": skin["version"], "colors": skin["colors"]} if skin else None,
         "issues": issues,

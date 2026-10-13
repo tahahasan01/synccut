@@ -380,7 +380,7 @@
       skinUrl = (name) => `${root}${name}.png?v=${S.skin.version}`;
       stage.classList.add("skinned");
       const desk = el("img", "wallpaper", camera);
-      desk.src = skinUrl("desktop");
+      desk.src = skinUrl(S.dock === false ? "desktop_nodock" : "desktop");
       loads.push(desk.decode().catch(() => {}));
       dom.clock = null;
       for (const win of S.windows) buildWindow(win, camera, loads);
@@ -418,6 +418,7 @@
       Object.assign(a.style, { width: `${d.icon}px`, height: `${d.icon}px`, marginLeft: i ? `${d.gap}px` : "0" });
     });
     Object.assign(dock.style, { height: `${d.h}px`, top: `${d.y}px`, left: "0px" });
+    if (S.dock === false) dock.style.display = "none";  // like macOS's auto-hidden Dock
     dock.style.left = `${(W - dock.offsetWidth) / 2}px`;
 
     dom.camera = camera;
