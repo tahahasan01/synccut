@@ -132,3 +132,68 @@ def test_proxy_still_reaches_public_sites():
         title = page.title()
         browser.close()
     assert "synccut" in title.lower()
+
+
+@pytest.mark.parametrize("address", [
+    "64:ff9b::7f00:1",          # NAT64 → 127.0.0.1
+    "64:ff9b::a00:1",           # NAT64 → 10.0.0.1
+    "2002:7f00:1::",            # 6to4 → 127.0.0.1
+    "2002:a9fe:a9fe::",         # 6to4 → 169.254.169.254
+    "::ffff:10.0.0.1",          # IPv4-mapped private
+    "fc00::1", "fe80::1", "::1", "ff02::1",
+])
+def test_ipv6_forms_of_internal_addresses_are_refused(address):
+    assert netguard._is_public_ip(ipaddress.ip_address(address)) is False
+
+
+def test_global_addresses_are_allowed():
+    for address in ("8.8.8.8", "2606:4700:4700::1111", "64:ff9b::808:808"):  # last: NAT64 → 8.8.8.8
+        assert netguard._is_public_ip(ipaddress.ip_address(address)) is True
+
+
+class _Recorder(http.server.BaseHTTPRequestHandler):
+    seen: list = []
+
+    def do_GET(self):  # noqa: N802
+        self.seen.append((self.path, self.headers.get("Host")))
+        body = b"ok"
+        self.send_response(200)
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+def test_one_request_per_connection_and_host_rewritten(monkeypatch):
+    """A pipelined second request (for another host) must not ride along to the first server,
+    and a spoofed Host header must not reach it."""
+    public = http.server.ThreadingHTTPServer(("127.0.0.2", 0), type("A", (_Recorder,), {"seen": []}))
+    secret = http.server.ThreadingHTTPServer(("127.0.0.1", 0), type("S", (_Recorder,), {"seen": []}))
+    for s in (public, secret):
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+    pa, sa = public.server_address[1], secret.server_address[1]
+    real = netguard._is_public_ip
+    monkeypatch.setattr(netguard, "_is_public_ip", lambda ip: ip == ipaddress.ip_address("127.0.0.2") or real(ip))
+    monkeypatch.setattr(netguard, "ALLOWED_PORTS", netguard.ALLOWED_PORTS | {pa, sa})
+    try:
+        pipelined = (f"GET http://127.0.0.2:{pa}/first HTTP/1.1\r\nHost: admin.internal\r\n\r\n"
+                     f"GET http://127.0.0.1:{sa}/secret HTTP/1.1\r\nHost: 127.0.0.1:{sa}\r\n\r\n").encode()
+        with EgressProxy() as proxy, socket.create_connection(("127.0.0.1", proxy.port), timeout=10) as s:
+            s.sendall(pipelined)
+            reply = b""
+            while chunk := s.recv(4096):
+                reply += chunk
+        assert reply.count(b"HTTP/1.") == 1  # one response, then the proxy closed the connection
+        assert public.RequestHandlerClass.seen == [("/first", f"127.0.0.2:{pa}")]  # Host rewritten
+        assert secret.RequestHandlerClass.seen == []
+    finally:
+        public.shutdown()
+        secret.shutdown()
+
+
+def test_chunked_and_upgrade_requests_are_refused():
+    with EgressProxy() as proxy:
+        assert raw(proxy.port, b"POST http://8.8.8.8/ HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n").startswith(b"HTTP/1.1 400")
+        assert raw(proxy.port, b"GET http://8.8.8.8/ HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n").startswith(b"HTTP/1.1 400")
