@@ -19,7 +19,7 @@ from typing import Callable
 from urllib.parse import quote_plus, urlparse
 
 from .core.actions import content_key
-from .netguard import BlockedURL, check_url, guard_context
+from .netguard import BlockedURL, EgressProxy, check_url, guard_context
 
 MAX_FAVICON_BYTES = 256 * 1024
 
@@ -220,11 +220,15 @@ def capture_actions(actions: list[dict], out_dir: Path, progress: Callable[[floa
     cap = Capturer(out_dir, progress)
     results: dict[str, dict] = {}
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=chromium_executable(), headless=True)
+    # All capture traffic leaves through the egress proxy, which resolves each host once,
+    # refuses non-public addresses and connects to exactly the address it checked.
+    with EgressProxy() as proxy, sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=chromium_executable(), headless=True,
+                                    args=proxy.chromium_args(), proxy={"server": proxy.url, "bypass": ""})
         ctx = browser.new_context(viewport={"width": VIEW_W, "height": VIEW_H}, device_scale_factor=1, locale="en-US",
-                                  service_workers="block")  # service workers would bypass the route guard
-        guard_context(ctx)  # every request the pages make (redirects, iframes, scripts) must be public too
+                                  proxy={"server": proxy.url, "bypass": ""},  # also covers ctx.request (favicons)
+                                  service_workers="block")
+        guard_context(ctx)  # fast first filter; the proxy is the actual boundary
         tabs = [{"ctx": ctx, "live": None, "history": ["start"], "scroll": 0.0}]
         active, previous = 0, 0
         try:
