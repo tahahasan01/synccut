@@ -50,7 +50,7 @@ export function ExportStep({ project, onChange }: { project: Project; onChange: 
         <JobLine project={project} type="render" />
         {final && (
           <div className="mt-4 space-y-3">
-            <video key={final.id} src={mediaUrl(project.id, final.path!)} controls className="w-full rounded-lg bg-black" />
+            <video key={final.id} src={mediaUrl(project.id, final.path!)} poster={final.poster_path ? mediaUrl(project.id, final.poster_path) : undefined} controls className="w-full rounded-lg bg-black" />
             <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
               <a href={mediaUrl(project.id, final.path!)} download={`${project.name}.mp4`} className="font-medium text-ink hover:underline">
                 Download MP4

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { HeroDemo } from "@/components/demo/HeroDemo";
 import { Badge, Button, Notice, inputClass } from "@/components/ui";
-import { api, ApiError, fmtTime, type ProjectSummary } from "@/lib/api";
+import { api, ApiError, fmtDuration, type ProjectSummary } from "@/lib/api";
 
 const STEP_NAMES = ["Narration", "Browser actions", "Preview", "Export"];
 
@@ -15,7 +15,7 @@ function steps(p: ProjectSummary): boolean[] {
 }
 
 function describe(p: ProjectSummary): string {
-  const parts = [p.duration_ms ? `${fmtTime(p.duration_ms).replace(/\.\d$/, "")} narration` : "No narration yet"];
+  const parts = [p.duration_ms ? `${fmtDuration(p.duration_ms)} narration` : "No narration yet"];
   if (p.beats > 0) parts.push(`${p.beats} steps`);
   if (p.mode === "record") parts.push("recording mode");
   return parts.join(", ");
@@ -39,6 +39,16 @@ export default function Home() {
   useEffect(() => {
     api.listProjects().then(setProjects, (e) => setError(e instanceof ApiError ? e.message : String(e)));
   }, []);
+
+  async function remove(p: ProjectSummary) {
+    if (!window.confirm(`Delete "${p.name}"? Its video, takes and exports are removed for good.`)) return;
+    try {
+      await api.deleteProject(p.id);
+      setProjects((ps) => ps?.filter((x) => x.id !== p.id) ?? null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+    }
+  }
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -95,11 +105,11 @@ export default function Home() {
             const done = steps(p);
             const next = done.indexOf(false);
             return (
-              <li key={p.id} className="border-b border-rule">
-                <Link href={`/projects/${p.id}`} className="group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-6 gap-y-2 py-4 sm:grid-cols-[minmax(0,1fr)_220px_110px]">
+              <li key={p.id} className="flex items-center gap-3 border-b border-rule">
+                <Link href={`/projects/${p.id}`} className="group grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-6 gap-y-2 py-4 sm:grid-cols-[minmax(0,1fr)_220px_110px]">
                   <span className="min-w-0">
                     <span className="block truncate font-bold text-ink group-hover:underline group-hover:decoration-cue group-hover:decoration-2 group-hover:underline-offset-4">{p.name}</span>
-                    <span className="mt-0.5 block text-sm text-muted tabular">{describe(p)}</span>
+                    <span className="mt-0.5 block text-sm text-muted">{describe(p)}</span>
                   </span>
                   <span className="order-last col-span-2 sm:order-none sm:col-span-1">
                     <span className="flex gap-1" aria-hidden>
@@ -114,6 +124,13 @@ export default function Home() {
                   </span>
                   <span className="text-right text-xs text-muted">{relative(p.updated_at)}</span>
                 </Link>
+                <button
+                  onClick={() => remove(p)}
+                  aria-label={`Delete ${p.name}`}
+                  className="shrink-0 rounded-[var(--radius-control)] px-2 py-1 text-xs font-semibold text-muted hover:bg-signal/10 hover:text-signal focus-visible:text-signal"
+                >
+                  Delete
+                </button>
               </li>
             );
           })}

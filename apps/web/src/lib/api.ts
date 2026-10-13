@@ -96,6 +96,7 @@ export type Timeline = {
 
 export type Render = {
   id: string;
+  poster_path?: string | null;
   preset: "draft" | "final";
   status: "rendering" | "ready" | "failed";
   path: string | null;
@@ -135,6 +136,7 @@ export type Project = {
   jobs: Job[];
   share: Share;
   mode: "generate" | "record";
+  page_url?: string;
   actions: Action[];
   actions_source: "claude" | "rules" | "user" | null;
   capture: { run: string; captured_at: number; pages: number } | null;
@@ -274,6 +276,7 @@ export const api = {
     form.append("file", file);
     return request<Project>(`/api/projects/${id}/subtitles`, { method: "POST", body: form });
   },
+  setPage: (id: string, url: string) => request<Project>(`/api/projects/${id}/page`, json("PUT", { url })),
   setMode: (id: string, mode: Project["mode"]) => request<Project>(`/api/projects/${id}/mode`, json("PUT", { mode })),
   prepare: (id: string, replan: boolean) => request<Job>(`/api/projects/${id}/prepare`, json("POST", { replan })),
   putActions: (id: string, actions: Action[]) => request<Project>(`/api/projects/${id}/actions`, json("PUT", { actions })),
@@ -295,6 +298,13 @@ export function fmtTime(ms: number): string {
   const m = Math.floor(total / 60);
   const s = total - m * 60;
   return `${m}:${s.toFixed(1).padStart(4, "0")}`;
+}
+
+/** A length for prose ("2:05", "45s"), unlike fmtTime's editing precision. */
+export function fmtDuration(ms: number): string {
+  const total = Math.round(Math.max(0, ms) / 1000);
+  if (total < 60) return `${total}s`;
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
 export const frameMs = (frame: number, fps: number) => (frame * 1000) / fps;

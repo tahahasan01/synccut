@@ -219,3 +219,41 @@ def test_ipv4_compatible_ipv6_is_refused(address):
 def test_ambiguous_requests_are_refused(request_bytes):
     with EgressProxy() as proxy:
         assert raw(proxy.port, request_bytes).startswith((b"HTTP/1.1 400", b"HTTP/1.1 403"))
+
+
+def test_huge_chunk_is_streamed_not_buffered():
+    """A server declaring a giant chunk must not make the proxy allocate it: bytes flow
+    through as they arrive."""
+    from synccut.netguard import _relay_one_response
+
+    async def run():
+        reader = asyncio.StreamReader()
+        reader.feed_data(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nfffffffff\r\n" + b"x" * 100_000)
+        reader.feed_eof()  # server stops after 100 KB of a "64 GB" chunk
+
+        class Sink:
+            def __init__(self):
+                self.size = 0
+            def write(self, b):
+                self.size += len(b)
+            async def drain(self):
+                pass
+
+        sink = Sink()
+        with pytest.raises(ConnectionError):
+            await _relay_one_response(reader, sink, False)
+        return sink.size
+
+    assert asyncio.run(run()) > 100_000  # everything received was forwarded
+
+
+def test_connections_over_the_limit_are_refused(monkeypatch):
+    monkeypatch.setattr(netguard, "MAX_CONNECTIONS", 2)
+    with EgressProxy() as proxy:
+        idle = [socket.create_connection(("127.0.0.1", proxy.port), timeout=10) for _ in range(2)]
+        import time
+        time.sleep(0.3)
+        with socket.create_connection(("127.0.0.1", proxy.port), timeout=10) as extra:
+            assert extra.recv(256).startswith(b"HTTP/1.1 503")  # refused before it can send anything
+        for s in idle:
+            s.close()

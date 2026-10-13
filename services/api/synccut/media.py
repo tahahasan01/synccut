@@ -66,6 +66,11 @@ def probe(path: str | Path) -> dict:
     }
 
 
+def poster(src: str | Path, dst: str | Path, at_s: float) -> None:
+    """One still frame for the video player before it plays (frame 0 is often an empty tab)."""
+    ffmpeg("-ss", f"{max(0.0, at_s):.2f}", "-i", str(src), "-frames:v", "1", "-vf", "scale=1280:-2", "-q:v", "3", str(dst), timeout=60)
+
+
 def extract_wav(src: str | Path, dst: str | Path) -> None:
     ffmpeg("-i", str(src), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(dst))
 

@@ -30,9 +30,10 @@ export default function BrandPage() {
   const set = (patch: Partial<Brand>) => setBrand({ ...brand, ...patch });
 
   return (
-    <main className="mx-auto w-full max-w-3xl space-y-5 px-4 py-8 sm:px-6">
-      <h1 className="text-xl font-semibold text-ink">Brand settings</h1>
-      <p className="text-sm text-muted">Shown on every share page. Use your own name and brand.</p>
+    <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
+      <h1 className="text-[28px] font-extrabold leading-tight tracking-tight text-ink">Brand</h1>
+      <p className="mt-1 text-sm text-muted">Shown on every share page. Use your own name and brand.</p>
+      <div className="mt-6 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
       <form onSubmit={save} className="space-y-5">
         <Card title="You">
           <div className="grid gap-4 md:grid-cols-2">
@@ -68,7 +69,7 @@ export default function BrandPage() {
           {brand.portfolio.length === 0 && <p className="text-sm text-muted">Links to past work, case studies or demos.</p>}
           <div className="space-y-2">
             {brand.portfolio.map((item, i) => (
-              <div key={i} className="flex gap-2">
+              <div key={i} className="flex flex-col gap-2 sm:flex-row">
                 <input className={inputClass} placeholder="Title" value={item.title}
                   onChange={(e) => set({ portfolio: brand.portfolio.map((p, j) => (j === i ? { ...p, title: e.target.value } : p)) })} />
                 <input className={inputClass} placeholder="https://…" value={item.url}
@@ -81,6 +82,54 @@ export default function BrandPage() {
         {error && <Notice tone="bad">{error}</Notice>}
         <Button type="submit">{saved ? "Saved" : "Save brand"}</Button>
       </form>
+      <SharePreview brand={brand} />
+      </div>
     </main>
+  );
+}
+
+const web = (u: string) => (/^https?:\/\//i.test(u.trim()) ? u.trim() : "");
+
+/** What a client sees at the top of a share page, updated as you type. */
+function SharePreview({ brand }: { brand: Brand }) {
+  const accent = brand.accent || "#4F46E5";
+  const avatar = web(brand.avatar_url);
+  return (
+    <aside aria-label="Share page preview" className="lg:sticky lg:top-6">
+      <h2 className="mb-2 text-sm font-semibold text-muted">How clients see it</h2>
+      <div className="overflow-hidden rounded-xl border border-rule bg-paper shadow-sm">
+        <div className="flex items-center gap-3 border-b border-rule bg-white px-4 py-3">
+          {avatar ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={avatar} alt="" className="h-9 w-9 rounded-full object-cover" />
+          ) : (
+            <div className="flex h-9 w-9 items-center justify-center rounded-full font-semibold text-white" style={{ background: accent }}>
+              {(brand.name || "?").slice(0, 1)}
+            </div>
+          )}
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-ink">{brand.name || "Your name"}</div>
+            <div className="truncate text-xs text-muted">{brand.headline || "Your headline"}</div>
+          </div>
+        </div>
+        <div className="space-y-3 p-4">
+          {brand.rating_text && <div className="inline-block rounded-full bg-ink/5 px-2.5 py-0.5 text-xs text-ink">{brand.rating_text}</div>}
+          <div className="flex aspect-video items-center justify-center rounded-lg bg-ink text-xs text-white/60">Your video</div>
+          {web(brand.booking_url) && (
+            <div className="rounded-lg border border-rule bg-white px-3 py-2 text-xs font-semibold" style={{ color: accent }}>Your booking calendar</div>
+          )}
+          {web(brand.profile_url) && (
+            <div className="rounded-lg px-3 py-2 text-center text-xs font-semibold text-white" style={{ background: accent }}>View my profile</div>
+          )}
+          {brand.portfolio.filter((i) => web(i.url)).length > 0 && (
+            <ul className="space-y-1">
+              {brand.portfolio.filter((i) => web(i.url)).map((i, n) => (
+                <li key={n} className="truncate rounded border border-rule bg-white px-3 py-1.5 text-xs text-ink">{i.title || i.url}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </aside>
   );
 }

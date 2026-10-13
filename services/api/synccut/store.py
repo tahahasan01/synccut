@@ -34,6 +34,7 @@ def with_defaults(project: dict) -> dict:
     """Fields added after v0 shipped; older projects keep recording mode."""
     project.setdefault("mode", "record" if project.get("takes") else "generate")
     project.setdefault("actions", [])
+    project.setdefault("page_url", "")
     project.setdefault("actions_source", None)
     project.setdefault("capture", None)
     project.setdefault("browser_video", None)

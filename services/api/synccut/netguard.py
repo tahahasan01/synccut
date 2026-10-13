@@ -143,9 +143,16 @@ _HOST = r"(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?(?:\.
 _AUTHORITY = re.compile(_HOST + r":(\d{1,5})")
 _AUTHORITY_OPTIONAL_PORT = re.compile(_HOST + r"(?::(\d{1,5}))?")
 _HEAD_LIMIT = 64 * 1024
+# Resource limits for one capture browser.
+MAX_CONNECTIONS = 256  # Chromium caps a profile at 256 sockets; more means something is wrong
+MAX_REQUEST_BODY = 10 * 1024 * 1024
+MAX_TRAILERS = 32
+IDLE_TIMEOUT = 60  # seconds without a byte either way closes a tunnel or response
+CRLF = b"\r\n"
 _FORBIDDEN = b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 9\r\nConnection: close\r\n\r\nForbidden"
 _BAD_REQUEST = b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
 _BAD_GATEWAY = b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+_SERVICE_UNAVAILABLE = b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
 
 
 async def resolve_pinned(host: str, port: int) -> str | None:
@@ -195,8 +202,10 @@ async def _connect_any(addresses: list[str], port: int):
 
 
 async def _pipe(reader, writer) -> None:
+    import asyncio
+
     try:
-        while data := await reader.read(65536):
+        while data := await asyncio.wait_for(reader.read(65536), IDLE_TIMEOUT):
             writer.write(data)
             await writer.drain()
     except Exception:
@@ -208,6 +217,19 @@ async def _pipe(reader, writer) -> None:
             pass
 
 
+async def _copy(reader, writer, n: int) -> None:
+    """Stream exactly n bytes in bounded pieces, never buffering a server-chosen size."""
+    import asyncio
+
+    while n > 0:
+        chunk = await asyncio.wait_for(reader.read(min(65536, n)), IDLE_TIMEOUT)
+        if not chunk:
+            raise ConnectionError("upstream closed mid-body")
+        writer.write(chunk)
+        n -= len(chunk)
+        await writer.drain()
+
+
 def _split_host_port(authority: str, default: int) -> tuple[str, int]:
     if authority.startswith("["):  # [v6]:port
         host, _, rest = authority[1:].partition("]")
@@ -216,6 +238,14 @@ def _split_host_port(authority: str, default: int) -> tuple[str, int]:
     if sep and port.isdigit():
         return host, int(port)
     return authority, default
+
+
+async def _handle_limited(slots, reader, writer) -> None:
+    if slots.locked():  # over MAX_CONNECTIONS: refuse instead of queueing without bound
+        await _refuse(writer, _SERVICE_UNAVAILABLE)
+        return
+    async with slots:
+        await _handle(reader, writer)
 
 
 async def _handle(reader, writer) -> None:
@@ -278,7 +308,7 @@ async def _handle(reader, writer) -> None:
                 await _refuse(writer, _BAD_REQUEST)
                 return
             length = int(value)
-    if names.count("content-length") > 1 or length < 0 or length > 50 * 1024 * 1024:
+    if names.count("content-length") > 1 or length < 0 or length > MAX_REQUEST_BODY:
         await _refuse(writer, _BAD_REQUEST)
         return
     addresses = await resolve_allowed(host, port)
@@ -314,6 +344,8 @@ async def _handle(reader, writer) -> None:
 
 
 async def _relay_one_response(reader, writer, head_request: bool) -> None:
+    import asyncio
+
     head = await reader.readuntil(b"\r\n\r\n")
     status_line, *header_lines = head.decode("latin-1").split("\r\n")
     status = int(status_line.split(" ", 2)[1])
@@ -329,27 +361,23 @@ async def _relay_one_response(reader, writer, head_request: bool) -> None:
         return
     if "chunked" in fields.get("transfer-encoding", "").lower():
         while True:
-            size_line = await reader.readuntil(b"\r\n")
+            size_line = await asyncio.wait_for(reader.readuntil(CRLF), IDLE_TIMEOUT)
             writer.write(size_line)
             size = int(size_line.split(b";")[0].strip() or b"0", 16)
             if size == 0:
-                while (trailer := await reader.readuntil(b"\r\n")) != b"\r\n":
+                for _ in range(MAX_TRAILERS):
+                    trailer = await asyncio.wait_for(reader.readuntil(CRLF), IDLE_TIMEOUT)
                     writer.write(trailer)
-                writer.write(b"\r\n")
+                    if trailer == CRLF:
+                        break
+                else:
+                    raise ValueError("too many trailers")
                 break
-            writer.write(await reader.readexactly(size + 2))  # chunk + CRLF
-            await writer.drain()
+            await _copy(reader, writer, size + 2)  # chunk + CRLF, streamed
     elif "content-length" in fields:
-        remaining = int(fields["content-length"])
-        while remaining > 0:
-            chunk = await reader.read(min(65536, remaining))
-            if not chunk:
-                break
-            writer.write(chunk)
-            remaining -= len(chunk)
-            await writer.drain()
+        await _copy(reader, writer, int(fields["content-length"]))
     else:
-        while chunk := await reader.read(65536):  # delimited by close
+        while chunk := await asyncio.wait_for(reader.read(65536), IDLE_TIMEOUT):  # delimited by close
             writer.write(chunk)
             await writer.drain()
     await writer.drain()
@@ -386,7 +414,9 @@ class EgressProxy:
                 if not isinstance(context.get("exception"), (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
                     loop.default_exception_handler(context)
             self._loop.set_exception_handler(quiet)
-            self._server = self._loop.run_until_complete(asyncio.start_server(_handle, "127.0.0.1", 0, limit=_HEAD_LIMIT))
+            slots = asyncio.Semaphore(MAX_CONNECTIONS)
+            handler = lambda r, w: _handle_limited(slots, r, w)  # noqa: E731
+            self._server = self._loop.run_until_complete(asyncio.start_server(handler, "127.0.0.1", 0, limit=_HEAD_LIMIT))
             self.port = self._server.sockets[0].getsockname()[1]
             ready.set()
             self._loop.run_forever()

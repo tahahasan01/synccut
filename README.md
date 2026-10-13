@@ -8,6 +8,8 @@ You never record your screen.
 
 ![SyncCut home page with the animated demo](docs/images/home.png)
 
+**Demo video (66 s):** [docs/SyncCut-demo.mp4](docs/SyncCut-demo.mp4). Upload, timestamps, AI-planned browser actions, the generated macOS browser in sync, export, then the finished MP4 with sound.
+
 ---
 
 ## Contents
@@ -143,6 +145,7 @@ Put settings in a `.env` file at the repository root (it is git-ignored).
 
 1. **Brand:** add your name, track record, profile link, booking link (Calendly or Cal.com) and portfolio. These appear on share pages.
 2. **Start a video** and upload your narration. Steps appear once it's transcribed (or click **Import subtitles**).
+   Optionally paste **the page you're talking about**: the job posting you're replying to, or your own site. Phrases like "your job post", "the listing" or "my site" open it, and the video starts on it if you never name another site first. Changing it re-plans the actions.
 3. **Browser actions:** check the cues in the script. Click a cue to change its time (±0.2 s), what it does, or its target. Click any word to add a cue there. **Save and capture pages** when you're done; timing-only changes don't re-capture.
 4. **Preview:** play it back, move or resize your video, and turn the zoom-on-actions camera on or off.
 5. **Export & share:** export the MP4, then publish the share page.
@@ -167,6 +170,7 @@ Share links (`/v/<slug>`) only work for clients once both the web app and the AP
 ## Security
 
 - **Page capture only opens public websites.** Every page, redirect, iframe, script and favicon request the capture browser makes is checked: loopback, private networks, link-local (cloud metadata), carrier-grade NAT, multicast and reserved addresses are refused, as are non-http(s) schemes and URLs with embedded credentials. Service workers are disabled in the capture browser so nothing bypasses this.
+- **The capture proxy has resource limits.** At most 256 concurrent connections, a 10 MB request-body cap, response bodies streamed in 64 KB pieces (a server can't make it buffer a huge declared chunk), a cap on chunked trailers, and a 60 s idle timeout on tunnels and responses.
 - **Captured and uploaded files are inert.** Favicons are stored only as verified PNG/JPEG/GIF/WebP/ICO (never SVG), and everything under `/media` is served with `X-Content-Type-Options: nosniff` and a sandboxed, script-free Content-Security-Policy.
 - **Share-page links must be http(s).** Brand links (profile, booking, avatar, portfolio) are validated on the server and again on the page, so a `javascript:` URL can't run there. The booking calendar iframe is sandboxed.
 - **Secrets stay out of git.** `.env` is ignored; credentials are read from the environment only.

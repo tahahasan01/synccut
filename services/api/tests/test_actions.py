@@ -60,3 +60,50 @@ def test_validate_sorts_and_cleans():
     ], 10_000)
     assert [a["type"] for a in out] == ["navigate", "search"]
     assert out[0]["url"] == "https://www.google.com/" and out[0]["id"] == "a1"
+
+
+def _words(text: str) -> list[dict]:
+    return [{"w": w, "start_ms": i * 400.0, "end_ms": i * 400.0 + 350} for i, w in enumerate(text.split())]
+
+
+JOB = "https://www.upwork.com/jobs/~0123456789abcdef"
+
+
+def test_reference_to_the_linked_job_post_opens_it():
+    from synccut.core.actions import open_page_first, plan_with_rules, validate_actions
+
+    words = _words("Hi Sarah. I read your job post and you need a CRM. Then I'll scroll down to the requirements.")
+    actions = validate_actions(plan_with_rules(words, JOB), 60_000)
+    assert actions[0]["type"] == "navigate" and actions[0]["url"] == JOB
+    assert actions[0]["at_ms"] == words[3]["start_ms"]  # at "read"
+    assert open_page_first(actions, JOB) == actions  # already opened, nothing prepended
+
+
+def test_linked_page_opens_first_when_narration_never_names_it():
+    from synccut.core.actions import open_page_first, plan_with_rules, validate_actions
+
+    words = _words("Hi there, scroll down and you will see what I mean.")
+    actions = open_page_first(validate_actions(plan_with_rules(words, JOB), 60_000), JOB)
+    assert actions[0]["type"] == "navigate" and actions[0]["url"] == JOB and actions[0]["at_ms"] == 0
+    assert actions[1]["type"] == "scroll"
+
+
+def test_no_link_means_no_page_references():
+    from synccut.core.actions import plan_with_rules
+
+    assert plan_with_rules(_words("I read your job post carefully."), "") == []
+
+
+def test_page_link_must_be_public_web_url():
+    from fastapi.testclient import TestClient
+    from synccut.main import app
+
+    client = TestClient(app)
+    pid = client.post("/api/projects", json={"name": "page test"}).json()["id"]
+    try:
+        assert client.put(f"/api/projects/{pid}/page", json={"url": "javascript:alert(1)"}).status_code == 422
+        assert client.put(f"/api/projects/{pid}/page", json={"url": "http://127.0.0.1:8000/"}).status_code == 422
+        res = client.put(f"/api/projects/{pid}/page", json={"url": "8.8.8.8/jobs/1"})
+        assert res.status_code == 200 and res.json()["page_url"] == "https://8.8.8.8/jobs/1"
+    finally:
+        client.delete(f"/api/projects/{pid}")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 
@@ -23,6 +24,8 @@ from .jobs import JobContext
 from .stage_render import render_stage
 from .store import Store, new_id
 from .transcribe import transcribe
+
+log = logging.getLogger("synccut.pipeline")
 
 MAX_TIMELINE_VERSIONS = 20
 
@@ -51,7 +54,7 @@ def save_transcript(store: Store, pid: str, result: dict) -> None:
     generate = project.get("mode") == "generate"
     with ThreadPoolExecutor(max_workers=2) as pool:
         beats_job = pool.submit(claude_beats, result["words"])
-        actions_job = pool.submit(plan_actions, result["words"], duration) if generate else None
+        actions_job = pool.submit(plan_actions, result["words"], duration, project.get("page_url", "")) if generate else None
         beats, source = beats_job.result()
         actions, actions_source = actions_job.result() if actions_job else (None, None)
 
@@ -107,7 +110,7 @@ def prepare(store: Store, ctx: JobContext, replan: bool) -> None:
     actions = project.get("actions") or []
     if replan or not actions:
         ctx.progress(0.02, "Planning browser actions" + (" with Claude" if credential_kind() else ""), force=True)
-        actions, source = plan_actions(project["transcript"]["words"], duration)
+        actions, source = plan_actions(project["transcript"]["words"], duration, project.get("page_url", ""))
         store.update(ctx.pid, lambda p: p.update(actions=actions, actions_source=source))
     if not actions:
         raise PipelineError("No browser actions were found in the narration. Add them by hand on the Actions tab.")
@@ -308,11 +311,18 @@ def render(store: Store, ctx: JobContext, render_id: str, preset: str) -> None:
         progress=lambda f, m: ctx.progress(compose_from + (1 - compose_from) * f, m),
     )
     _cleanup(pdir / "renders" / f"{render_id}_work")
+    poster_rel = f"renders/{render_id}.jpg"
+    try:
+        # A third of the way in, the browser is on a real page and the speaker is mid-sentence.
+        media.poster(out, pdir / poster_rel, (result.get("duration_ms") or 0) / 1000 * 0.35)
+    except Exception as exc:  # a missing poster only means the player shows frame 0
+        log.warning("Poster frame failed: %s", exc)
+        poster_rel = None
 
     def done(p: dict) -> None:
         for r in p["renders"]:
             if r["id"] == render_id:
-                r.update(status="ready", path=out_rel, probe=result, seconds=round(time.time() - started, 1),
+                r.update(status="ready", path=out_rel, poster_path=poster_rel, probe=result, seconds=round(time.time() - started, 1),
                          timeline_version=timeline["version"])
 
     store.update(ctx.pid, done)

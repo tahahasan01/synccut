@@ -106,8 +106,20 @@ PATTERNS: list[tuple[str, re.Pattern]] = [
 ]
 
 
-def plan_with_rules(words: list[dict]) -> list[dict]:
-    """Find browser actions in the narration with phrase patterns."""
+# "your job post", "my site", "our app": the page the user linked to the project.
+PAGE_REFERENCE = re.compile(
+    r"\b(?:open|opening|go to|going to|head over to|head to|visit|visiting|pull up|pulling up|bring up|load|navigate to|"
+    r"check out|checking out|look at|looking at|looked at|read|reading|went through|going through|go through|saw|"
+    r"here'?s|here is|this is)\s+(?:up\s+)?(?:my|our|your|the|this)\s+(?:own\s+)?"
+    r"(?P<noun>job posting|job post|job listing|job description|posting|listing|job|project|brief|website|site|web app|"
+    r"app|dashboard|store|shop|profile|portfolio|landing page|homepage|home page|page)\b")
+
+
+def plan_with_rules(words: list[dict], page_url: str = "") -> list[dict]:
+    """Find browser actions in the narration with phrase patterns.
+
+    page_url is the link the user gave the project (their site, or the job posting
+    they're replying to); references like "your job post" open it."""
     norm = normalize_words([w for w in words if w.get("w", "").strip()])
     if not norm:
         return []
@@ -120,7 +132,8 @@ def plan_with_rules(words: list[dict]) -> list[dict]:
     text = " ".join(parts)
 
     found: list[tuple[int, int, str, re.Match]] = []
-    for kind, pattern in PATTERNS:
+    patterns = PATTERNS + ([("page", PAGE_REFERENCE)] if page_url else [])
+    for kind, pattern in patterns:
         for m in pattern.finditer(text):
             if any(not (m.end() <= a or m.start() >= b) for a, b, _, _ in found):
                 continue  # an earlier, more specific pattern already claimed this phrase
@@ -130,7 +143,7 @@ def plan_with_rules(words: list[dict]) -> list[dict]:
     actions: list[dict] = []
     for start, end, kind, m in found:
         idx = max(0, bisect.bisect_right(starts, start) - 1)
-        action = _build(kind, m)
+        action = _build(kind, m) if kind != "page" else {"type": "navigate", "url": page_url, "query": "", "target": "", "tab": 0}
         if action is None:
             continue
         action.update(
@@ -217,6 +230,15 @@ def validate_actions(actions: list[dict], duration_ms: float) -> list[dict]:
             a["id"] = f"a{i + 1}_{len(seen)}"
         seen.add(a["id"])
     return clean
+
+
+def open_page_first(actions: list[dict], page_url: str) -> list[dict]:
+    """With a linked page, the video opens on it unless the narration already does."""
+    if not page_url or any(a["type"] == "navigate" and a["url"] == page_url for a in actions):
+        return actions
+    opening = {"id": "a0", "type": "navigate", "at_ms": 0.0, "url": page_url, "query": "", "target": "", "tab": 0,
+               "spoken": "", "source": "page", "confidence": 1.0}
+    return [opening] + actions
 
 
 def content_key(action: dict) -> tuple:

@@ -24,6 +24,7 @@ from .core.edl import validate
 from .core.subtitles import parse_subtitles
 from .core.timeline import DEFAULT_LAYOUT, apply_fit, finalize, take_clips
 from .jobs import Jobs
+from .netguard import BlockedURL, check_url
 from .store import NotFound, Store, new_id
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -266,6 +267,38 @@ class ModeIn(BaseModel):
 @app.put("/api/projects/{pid}/mode")
 def set_mode(pid: str, body: ModeIn) -> dict:
     return _update(pid, lambda p: p.update(mode=body.mode))
+
+
+class PageIn(BaseModel):
+    url: str = Field("", max_length=2000)
+
+    @field_validator("url")
+    @classmethod
+    def public_web_url(cls, v: str) -> str:
+        v = (v or "").strip()
+        if v and "://" not in v:
+            v = f"https://{v}"
+        v = web_url_or_error(v)
+        if v:
+            try:
+                check_url(v)
+            except BlockedURL as exc:
+                raise ValueError(str(exc))
+        return v
+
+
+@app.put("/api/projects/{pid}/page")
+def set_page(pid: str, body: PageIn) -> dict:
+    """The page the video is about: the user's site, or the job posting they're replying to.
+    Changing it re-plans the browser actions when there is already a transcript."""
+    project = _project(pid)
+    if project.get("page_url", "") == body.url:
+        return project
+    updated = _update(pid, lambda p: p.update(page_url=body.url))
+    if updated.get("transcript") and updated.get("mode") == "generate" and not _busy(updated, "prepare"):
+        _start_prepare(pid, replan=True)
+        updated = _project(pid)
+    return updated
 
 
 class PrepareIn(BaseModel):
@@ -659,6 +692,7 @@ def get_share(slug: str) -> dict:
         "message": share["message"],
         "cta_label": share["cta_label"],
         "video_path": f"{project['id']}/{render['path']}",
+        "poster_path": f"{project['id']}/{render['poster_path']}" if render.get("poster_path") else None,
         "brand": store.get_brand(),
     }
 

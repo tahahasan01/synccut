@@ -3,7 +3,7 @@
 import { use, useEffect, useState } from "react";
 import { api, API_URL, type Brand } from "@/lib/api";
 
-type ShareData = { title: string; message: string; cta_label: string; video_path: string; brand: Brand };
+type ShareData = { title: string; message: string; cta_label: string; video_path: string; poster_path?: string | null; brand: Brand };
 
 export default function ShareClient({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
@@ -40,12 +40,13 @@ export default function ShareClient({ params }: { params: Promise<{ slug: string
               {(brand.name || "?").slice(0, 1)}
             </div>
           )}
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="font-semibold text-ink">{brand.name}</div>
             {brand.headline && <div className="truncate text-sm text-muted">{brand.headline}</div>}
+            {brand.rating_text && <div className="mt-0.5 text-sm text-ink sm:hidden">{brand.rating_text}</div>}
           </div>
           {brand.rating_text && (
-            <div className="ml-auto hidden rounded-full bg-ink/5 px-3 py-1 text-sm text-ink sm:block">{brand.rating_text}</div>
+            <div className="hidden shrink-0 rounded-full bg-ink/5 px-3 py-1 text-sm text-ink sm:block">{brand.rating_text}</div>
           )}
         </div>
       </header>
@@ -53,11 +54,11 @@ export default function ShareClient({ params }: { params: Promise<{ slug: string
       <div className="mx-auto grid max-w-5xl gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[1fr_340px]">
         <section className="space-y-5">
           <h1 className="text-2xl font-semibold text-ink">{data.title}</h1>
-          <video src={`${API_URL}/media/${data.video_path}`} controls playsInline className="w-full rounded-xl bg-black shadow-lg" />
+          <video src={`${API_URL}/media/${data.video_path}`} poster={data.poster_path ? `${API_URL}/media/${data.poster_path}` : undefined} controls playsInline className="w-full rounded-xl bg-black shadow-lg" />
           {data.message && <p className="whitespace-pre-line text-ink">{data.message}</p>}
           {brand.portfolio.length > 0 && (
             <div>
-              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Recent work</h2>
+              <h2 className="mb-3 text-base font-semibold text-ink">Recent work</h2>
               <div className="grid gap-3 sm:grid-cols-2">
                 {brand.portfolio.map((item) => (
                   <a key={item.url} href={item.url} target="_blank" rel="noopener noreferrer"

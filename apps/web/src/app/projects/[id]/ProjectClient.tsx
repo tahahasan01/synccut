@@ -9,7 +9,7 @@ import { PreviewStep } from "@/components/PreviewStep";
 import { RecordStep } from "@/components/RecordStep";
 import { ReviewStep } from "@/components/ReviewStep";
 import { Notice } from "@/components/ui";
-import { fmtTime, type Project } from "@/lib/api";
+import { fmtDuration, type Project } from "@/lib/api";
 import { useHealth, useProject } from "@/lib/hooks";
 
 type Tab = "narration" | "actions" | "preview" | "record" | "review" | "export";
@@ -33,7 +33,7 @@ function stepStatus(p: Project): Record<Tab, string> {
   const flags = p.timeline?.segments.filter((s) => s.needs_review).length ?? 0;
   const recorded = p.takes.filter((t) => t.status === "ready" && t.mode !== "generated").length;
   return {
-    narration: !p.master ? "Upload your video" : p.transcript ? `${fmtTime(p.master.probe?.duration_ms ?? 0)} · ${p.beats.length} steps` : running(p, "analyze") ? "Transcribing…" : "Needs a transcript",
+    narration: !p.master ? "Upload your video" : p.transcript ? `${fmtDuration(p.master.probe?.duration_ms ?? 0)}, ${p.beats.length} steps` : running(p, "analyze") ? "Transcribing…" : "Needs a transcript",
     actions: running(p, "prepare") ? "Capturing pages…" : p.capture ? `${p.actions.length} actions · ${p.capture.pages} pages` : p.transcript ? "Not planned yet" : "After the narration",
     preview: p.capture ? "Plays in sync with you" : "After the actions",
     record: recorded ? `${recorded} take${recorded === 1 ? "" : "s"}` : "No takes yet",
@@ -88,9 +88,6 @@ function ProjectView({
         <h1 className="mt-1 text-[28px] font-extrabold leading-tight tracking-tight text-ink">{project.name}</h1>
       </div>
 
-      {health && !health.whisper.ok && !project.transcript && (
-        <Notice tone="bad">{health.whisper.error} Or import a subtitle file (.srt / .vtt) on the Narration tab.</Notice>
-      )}
       {health && !health.ffmpeg && <Notice tone="bad">FFmpeg isn&apos;t available to the API. Install it and restart.</Notice>}
       {health && !health.claude.configured && (
         <Notice tone="info">No Anthropic API key found. Steps and browser actions come from phrase matching instead of Claude.</Notice>
@@ -118,7 +115,7 @@ function ProjectView({
                 </span>
                 <span className={`text-sm font-bold ${current ? "text-ink" : t.enabled ? "text-ink-soft group-hover:text-ink" : "text-rule-strong"}`}>{t.label}</span>
               </span>
-              <span className={`mt-0.5 block pl-8 text-xs tabular ${t.enabled ? "text-muted" : "text-rule-strong"}`}>{status[t.id]}</span>
+              <span className={`mt-0.5 block pl-8 text-xs ${t.enabled ? "text-muted" : "text-rule-strong"}`}>{status[t.id]}</span>
             </button>
           );
         })}

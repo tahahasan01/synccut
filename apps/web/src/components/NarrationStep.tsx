@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { api, ApiError, fmtTime, mediaUrl, type Beat, type Project } from "@/lib/api";
+import { useHealth } from "@/lib/hooks";
 import { Badge, Button, Card, JobLine, Notice, Progress, inputClass } from "./ui";
 
 export function NarrationStep({ project, onChange }: { project: Project; onChange: (p: Project) => void }) {
@@ -10,6 +11,9 @@ export function NarrationStep({ project, onChange }: { project: Project; onChang
   const fileRef = useRef<HTMLInputElement>(null);
   const subsRef = useRef<HTMLInputElement>(null);
   const analyzing = project.jobs.some((j) => j.type === "analyze" && (j.status === "queued" || j.status === "running"));
+  const { health } = useHealth();
+  const noWhisper = health ? !health.whisper.ok : false;
+  const lastAnalyze = project.jobs.find((j) => j.type === "analyze");
 
   async function onFile(file: File) {
     setError(null);
@@ -43,6 +47,7 @@ export function NarrationStep({ project, onChange }: { project: Project; onChang
           onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
         />
         {!project.master ? (
+          <>
           <button
             onClick={() => fileRef.current?.click()}
             onDragOver={(e) => e.preventDefault()}
@@ -56,6 +61,13 @@ export function NarrationStep({ project, onChange }: { project: Project; onChang
             <span className="text-sm font-medium text-ink">Drop your recorded video here, or click to choose</span>
             <span className="text-xs text-muted">MP4, MOV or WebM with your face and voice. It is never modified.</span>
           </button>
+          {noWhisper && (
+            <p className="mt-3 text-xs text-muted">
+              Automatic transcription isn&apos;t set up on this computer yet. After uploading, import the video&apos;s captions
+              (.srt or .vtt) and SyncCut takes the timing from them.
+            </p>
+          )}
+          </>
         ) : (
           <div className="grid gap-5 md:grid-cols-[280px_1fr]">
             <video src={mediaUrl(project.id, project.master.path)} controls className="w-full rounded-lg bg-black" />
@@ -81,16 +93,21 @@ export function NarrationStep({ project, onChange }: { project: Project; onChang
             </div>
           )}
           {error && <Notice tone="bad">{error}</Notice>}
-          {!project.transcript && <JobLine project={project} type="analyze" />}
+          {/* Without Whisper the failed transcription is expected; the note below says what to do instead. */}
+          {!project.transcript && !(noWhisper && lastAnalyze?.status === "failed") && <JobLine project={project} type="analyze" />}
           {project.master?.probe && !analyzing && !project.transcript && (
             <div className="flex flex-wrap items-center gap-2">
-              {project.jobs.find((j) => j.type === "analyze")?.status === "failed" && (
+              {lastAnalyze?.status === "failed" && !noWhisper && (
                 <Button variant="secondary" onClick={() => api.reanalyze(project.id).then(() => api.getProject(project.id)).then(onChange)}>
                   Try transcription again
                 </Button>
               )}
-              <Button variant="secondary" onClick={() => subsRef.current?.click()}>Import subtitles (.srt / .vtt)</Button>
-              <span className="text-xs text-muted">Use captions you already have instead of transcribing.</span>
+              <Button variant={noWhisper ? "primary" : "secondary"} onClick={() => subsRef.current?.click()}>Import subtitles (.srt / .vtt)</Button>
+              <span className="text-xs text-muted">
+                {noWhisper
+                  ? "Automatic transcription isn't set up on this computer, so the timing comes from your captions."
+                  : "Use captions you already have instead of transcribing."}
+              </span>
             </div>
           )}
           {project.transcript?.model?.startsWith("subtitles:") && (
@@ -115,8 +132,60 @@ export function NarrationStep({ project, onChange }: { project: Project; onChang
         </div>
       </Card>
 
+      {project.mode === "generate" && <PageLink key={project.page_url ?? ""} project={project} onChange={onChange} />}
+
       {project.beats.length > 0 && <BeatsEditor key={JSON.stringify(project.beats)} project={project} onChange={onChange} />}
     </div>
+  );
+}
+
+/** The page the video is about: the user's site, or the job posting they're replying to. */
+function PageLink({ project, onChange }: { project: Project; onChange: (p: Project) => void }) {
+  const [url, setUrl] = useState(project.page_url ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const saved = project.page_url ?? "";
+  const dirty = url.trim() !== saved;
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      onChange(await api.setPage(project.id, url.trim()));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card title="The page you're talking about">
+      <form onSubmit={save} className="space-y-3">
+        <p className="max-w-prose text-sm text-muted">
+          Paste the job posting you&apos;re replying to, or your own website. When you mention it (&ldquo;your job post&rdquo;,
+          &ldquo;my site&rdquo;), the browser opens this page, and the video starts on it if you never name another site first.
+        </p>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <label className="sr-only" htmlFor="page-url">Link</label>
+          <input
+            id="page-url"
+            type="url"
+            inputMode="url"
+            placeholder="https://www.upwork.com/jobs/… or yoursite.com"
+            className={`${inputClass} sm:flex-1`}
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <Button type="submit" disabled={!dirty || saving}>{saving ? "Saving…" : saved && !url.trim() ? "Remove link" : "Save link"}</Button>
+        </div>
+        {saved && !dirty && project.transcript && (
+          <p className="text-xs text-muted">Saved. Browser actions were planned again with this page.</p>
+        )}
+        {error && <Notice tone="bad">{error}</Notice>}
+      </form>
+    </Card>
   );
 }
 
