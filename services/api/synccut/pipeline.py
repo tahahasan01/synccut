@@ -22,6 +22,7 @@ from .core.scene import build_scene
 from .core.timeline import DEFAULT_LAYOUT, build_generated_timeline, build_timeline, ms_to_frame
 from .jobs import JobContext
 from .stage_render import render_stage
+from .skin import load_skin
 from .store import Store, new_id
 from .transcribe import transcribe
 
@@ -170,7 +171,8 @@ def scene_for(store: Store, pid: str, project: dict) -> dict | None:
     scene = build_scene(project.get("actions") or [], capture, project["master"]["probe"]["duration_ms"],
                         camera=bool(layout.get("camera_zoom", False)), fps=settings.fps,
                         clock_ms=_wall_clock_ms((project.get("capture") or {}).get("captured_at")),
-                        opening_url=project.get("page_url") or "")
+                        opening_url=project.get("page_url") or "",
+                        skin=load_skin(settings.data_dir / "skins"))
     scene["stale"] = not capture_is_current(capture, project.get("actions") or [], page_screenshots(store, pid, project))
     return scene
 

@@ -88,8 +88,12 @@ def test_results_land_right_after_the_word_not_seconds_later():
 
     scene = build_scene(ACTIONS, CAPTURE, 15_000)
     shows = {e["page"]: e["t"] for e in scene["tracks"]["tab_page"] if e["page"] != "start"}
-    assert abs(shows["p1"] - (1500 + LAND)) < 1  # "open Google" at 1.5 s: page painted 0.22 s later
-    assert abs(shows["p2"] - (4000 + LAND)) < 1
+    # "open Google" at 1.5 s: painted ~0.22 s later (a touch more here: 1.5 s isn't enough lead-in
+    # for a human-paced pointer move and typing, and nothing can start before 0:00)
+    assert 0 <= shows["p1"] - (1500 + LAND) < 150
+    search = scene["tracks"]["typing"][1]
+    assert 3800 <= search["t0"] <= 4100  # the query is typed as it is said, from "search"
+    assert shows["p2"] > search["t1"]  # results only after the last key and Enter
     assert scene["tracks"]["camera"] == []  # no zoom effect unless asked for
     assert scene["cursor"]["in"] < 0  # pointer on screen from the first frame
 
@@ -143,3 +147,34 @@ def test_tabs_are_counted_per_window():
     ], 10_000)
     scene = build_scene(actions, {"pages": {}, "results": {}}, 10_000)
     assert any("no_such_tab" in i["flags"] for i in scene["issues"])
+
+
+def test_typing_is_human_paced():
+    from synccut.core.scene import autocomplete_keys, keystrokes
+
+    keys = keystrokes("HubSpot workflow automation", "a1")
+    gaps = [b - a for a, b in zip(keys, keys[1:])]
+    assert 120 <= sum(gaps) / len(gaps) <= 200  # 60-100 words a minute, not a burst
+    assert min(gaps) > 70 and max(gaps) - min(gaps) > 60  # an uneven rhythm
+    assert keystrokes("HubSpot workflow automation", "a1") == keys  # deterministic, so renders repeat exactly
+    assert autocomplete_keys("hubspot.com") == 5  # "hubsp", then Chrome completes "ot.com"
+
+    scene = build_scene(ACTIONS, CAPTURE, 15_000)
+    nav = scene["tracks"]["typing"][0]
+    assert nav["typed"] < len(nav["text"]) and nav["enter"] - nav["t1"] >= 200  # a glance at the suggestion
+
+
+def test_skin_is_cut_from_a_screenshot(tmp_path):
+    import subprocess
+    from synccut.skin import CROPS, build_skin, load_skin
+
+    shot = tmp_path / "screen.png"
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=3840x2160",
+                    "-frames:v", "1", str(shot)], check=True)  # a Retina-size screenshot
+    build_skin(shot, tmp_path / "skins" / "default")
+    for name in ["desktop", *CROPS]:
+        assert (tmp_path / "skins" / "default" / f"{name}.png").exists()
+    skin = load_skin(tmp_path / "skins")
+    scene = build_scene(ACTIONS, CAPTURE, 15_000, skin=skin)
+    assert scene["skin"]["url"] == "/skins/default/" and scene["skin"]["colors"]["strip"]
+    assert build_scene(ACTIONS, CAPTURE, 15_000)["skin"] is None

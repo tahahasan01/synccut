@@ -12,22 +12,29 @@ The optional camera push-in is off by default.
 
 from __future__ import annotations
 
+import hashlib
+import math
 from urllib.parse import urlparse
 
 # A MacBook screen: macOS menu bar, the Dock, and Chrome windows in dark mode. Sizes
 # follow Chrome on macOS: tab strip (window controls, tab search, tabs, +), toolbar
 # (back/forward/reload, omnibox, extensions, profile) and the bookmarks bar.
+# The window rectangle and every bar height are measured from a real macOS Chrome
+# screenshot (see skin.py), so a skin cut from that screenshot lines up 1:1.
 STAGE_W, STAGE_H = 1920, 1080
 MENUBAR_H = 24
-WINDOW = {"x": 150, "y": 46, "w": 1620, "h": 930}
-TABSTRIP_H, TOOLBAR_H, BOOKMARKS_H = 40, 42, 36
+WINDOW = {"x": 293, "y": 91, "w": 1272, "h": 862}
+TABSTRIP_H, TOOLBAR_H, BOOKMARKS_H = 39, 42, 40  # bookmarks bar includes its 1 px divider
 CHROME_H = TABSTRIP_H + TOOLBAR_H + BOOKMARKS_H
-VIEW_W, VIEW_H = WINDOW["w"], WINDOW["h"] - CHROME_H  # captured pages are rendered at exactly this size
-TAB_LEFT, TAB_W, TAB_TOP, TAB_GAP = 126, 230, 7, 2  # within the window
-OMNI_LEFT, OMNI_RIGHT, OMNI_H = 121, 440, 36  # right: room for extensions, profile and menu
+CONTENT_INSET = 1  # the window's 1 px border
+VIEW_W, VIEW_H = WINDOW["w"] - 2 * CONTENT_INSET, WINDOW["h"] - CHROME_H  # captured pages are rendered at exactly this size
+TAB_LEFT, TAB_W, TAB_TOP, TAB_GAP = 126, 232, 5, 1  # within the window; TAB_LEFT/W are the tab body
+OMNI_LEFT, OMNI_W, OMNI_TOP, OMNI_H = 118, 622, 43, 38
+OMNI_RIGHT = WINDOW["w"] - OMNI_LEFT - OMNI_W
 DOCK = {"icon": 56, "gap": 12, "h": 76, "y": STAGE_H - 76 - 4}
-# A second or third window opens offset from the first, like macOS cascades them.
-WINDOW_OFFSETS = [(0, 0), (-46, 22), (46, 40)]
+# A second or third window opens offset from the first, like macOS cascades them
+# (kept clear of the Dock).
+WINDOW_OFFSETS = [(0, 0), (-46, 22), (46, 32)]
 MAX_WINDOWS = len(WINDOW_OFFSETS)
 
 
@@ -39,14 +46,13 @@ def window_rect(index: int) -> dict:
 def geometry(index: int) -> dict:
     """Clickable places in window `index`, in stage pixels."""
     w = window_rect(index)
-    tool_y = w["y"] + TABSTRIP_H + TOOLBAR_H / 2
     return {
         "window": w,
-        "content": {"x": w["x"], "y": w["y"] + CHROME_H, "w": VIEW_W, "h": VIEW_H},
-        "address": {"x": w["x"] + OMNI_LEFT, "y": tool_y - OMNI_H / 2, "w": w["w"] - OMNI_LEFT - OMNI_RIGHT, "h": OMNI_H},
-        "tab_y": w["y"] + TAB_TOP + (TABSTRIP_H - TAB_TOP) / 2,
+        "content": {"x": w["x"] + CONTENT_INSET, "y": w["y"] + CHROME_H, "w": VIEW_W, "h": VIEW_H},
+        "address": {"x": w["x"] + OMNI_LEFT, "y": w["y"] + OMNI_TOP, "w": OMNI_W, "h": OMNI_H},
+        "tab_y": w["y"] + 19,
         "tabs_x": w["x"] + TAB_LEFT,
-        "back": (w["x"] + 23, tool_y),
+        "back": (w["x"] + 23, w["y"] + 62),
     }
 
 
@@ -62,17 +68,23 @@ LAYOUT = {
     "toolbar_h": TOOLBAR_H,
     "bookmarks_h": BOOKMARKS_H,
     "tab": {"left": TAB_LEFT, "w": TAB_W, "top": TAB_TOP, "gap": TAB_GAP},
-    "omnibox": {"left": OMNI_LEFT, "right": OMNI_RIGHT, "h": OMNI_H},
+    "omnibox": {"left": OMNI_LEFT, "right": OMNI_RIGHT, "w": OMNI_W, "top": OMNI_TOP, "h": OMNI_H},
+    "content_inset": CONTENT_INSET,
     "dock": DOCK,
 }
 
 # Timing: the visible result of an action lands just after the word that triggers it,
 # so the work (pointer travel, typing, loading) is scheduled *before* the word.
-TRAVEL = 620     # pointer travel
+# Every duration is human-paced: a person reading their own script, not a bot.
+TRAVEL = 620     # a typical pointer move (actual moves scale with distance, see travel_ms)
+DWELL = 110      # the pointer settles on its target before the click
 PRESS = 90       # click
 LOAD = 420       # navigation: the old page stays until the new one paints
 LAND = 220       # result appears this long after the word starts
-TYPE_PER_CHAR, TYPE_MIN, TYPE_MAX = 38, 280, 950
+KEY_MS = 135     # average gap between keystrokes, about 75 words a minute
+KEY_MS_FAST = 88  # a quick typist (~130 wpm): the fastest we type when the next line is close
+REACT = 350      # a beat before typing into a tab or window that just opened
+AUTOCOMPLETE_PAUSE = 260  # glance at Chrome's inline suggestion, then press Enter
 CAMERA_ZOOM = 1.12
 LATE_FLAG_MS = 1500
 
@@ -104,6 +116,36 @@ def typed_text(action: dict) -> str:
     return pretty_url(action["url"])
 
 
+def travel_ms(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Longer pointer moves take longer (roughly Fitts's law), within human limits."""
+    return min(max(360 + math.dist(a, b) * 0.3, 420.0), 980.0)
+
+
+def keystrokes(text: str, seed: str = "") -> list[float]:
+    """Time of each key from the first one: an uneven human rhythm, but deterministic."""
+    out: list[float] = []
+    t = 0.0
+    for i, ch in enumerate(text):
+        if i:
+            h = int(hashlib.md5(f"{seed}|{text}|{i}".encode()).hexdigest()[:6], 16) / 0xFFFFFF
+            gap = KEY_MS * (0.65 + 0.7 * h)
+            if text[i - 1] == " ":
+                gap += 90 + 150 * h  # thinking of the next word
+            if ch.isupper():
+                gap += 45  # shift
+            if ch in "./-:":
+                gap += 40
+            t += gap
+        out.append(round(t, 1))
+    return out
+
+
+def autocomplete_keys(text: str) -> int:
+    """People type the start of a familiar address and let Chrome complete it."""
+    host = text.split("/")[0]
+    return min(len(text), max(3, min(7, round(len(host) * 0.45))))
+
+
 def _inside(point: tuple[float, float], rect: dict) -> bool:
     return rect["x"] <= point[0] <= rect["x"] + rect["w"] and rect["y"] <= point[1] <= rect["y"] + rect["h"]
 
@@ -129,6 +171,7 @@ def build_scene(
     fps: int = 30,
     clock_ms: float = 0,
     opening_url: str = "",
+    skin: dict | None = None,
 ) -> dict:
     pages = {"start": {"id": "start", "url": "", "title": "New Tab", "image": None, "height": VIEW_H, "status": "start", "favicon": None}}
     for pid, page in capture.get("pages", {}).items():
@@ -155,14 +198,16 @@ def build_scene(
     new_tab(windows[0])
     front, previous_window = 0, 0
     cursor = (CONTENT["x"] + CONTENT["w"] * 0.6, CONTENT["y"] + CONTENT["h"] * 0.55)
-    t_free = 0.0
+    t_free = 0.0   # when the pointer and page are free again
+    t_soft = 0.0   # when the pointer is free (a page may still be loading): enough to switch tab or window
     issues: list[dict] = []
     omnibox_focused = None  # tab id whose omnibox already has focus (a new tab's does)
 
-    def move(t0: float, to: tuple[float, float], dur: float = TRAVEL) -> float:
+    def move(t0: float, to: tuple[float, float], dur: float | None = None) -> float:
         nonlocal cursor
         if abs(to[0] - cursor[0]) < 1 and abs(to[1] - cursor[1]) < 1:
             return t0
+        dur = travel_ms(cursor, to) if dur is None else dur
         tracks["moves"].append({"t0": t0, "t1": t0 + dur, "x0": cursor[0], "y0": cursor[1], "x1": to[0], "y1": to[1]})
         cursor = to
         return t0 + dur
@@ -181,22 +226,23 @@ def build_scene(
     def page_height(page_id: str) -> float:
         return float(pages.get(page_id, {}).get("height") or VIEW_H)
 
-    def lead(ideal: float) -> tuple[float, float]:
+    def lead(ideal: float, soft: bool = False) -> tuple[float, float]:
         """Start no earlier than the previous action allows; return (start, how late)."""
-        begin = max(ideal, t_free, 0.0)
+        begin = max(ideal, t_soft if soft else t_free, 0.0)
         return begin, begin - max(ideal, 0.0)  # work that "would have" started before 0:00 isn't late
 
     def tab_point(g: dict, index: int) -> tuple[float, float]:
         return g["tabs_x"] + index * (TAB_W + TAB_GAP) + TAB_W / 2, g["tab_y"]
 
     def plus_point(g: dict, n_tabs: int) -> tuple[float, float]:
-        return g["tabs_x"] + n_tabs * (TAB_W + TAB_GAP) + 18, g["tab_y"]  # Chrome: just after the last tab
+        return g["tabs_x"] + n_tabs * (TAB_W + TAB_GAP) + 20, g["tab_y"]  # Chrome: just after the last tab
 
     def press(t: float, point: tuple[float, float]) -> None:
         tracks["presses"].append({"t": t, "x": point[0], "y": point[1]})
 
-    for action in actions:
+    for i_action, action in enumerate(actions):
         r = results.get(action["id"], {})
+        next_at = actions[i_action + 1]["at_ms"] if i_action + 1 < len(actions) else None
         flags = list(r.get("flags", []))
         at = action["at_ms"]
         win = windows[front]
@@ -205,6 +251,7 @@ def build_scene(
         tab = win["tabs"][win["active"]]
         kind = action["type"]
         end = at
+        end_soft = None
         shift = 0.0
 
         opens_first = at <= 400 or (opening_url and action["url"] == opening_url)
@@ -217,26 +264,37 @@ def build_scene(
 
         elif kind in ("navigate", "search"):
             text = typed_text(action)
-            typing_ms = min(max(len(text) * TYPE_PER_CHAR, TYPE_MIN), TYPE_MAX)
+            n_keys = len(text) if kind == "search" else autocomplete_keys(text)
+            keys = keystrokes(text[:n_keys], action["id"])
+            if kind == "search" and next_at is not None and len(keys) > 1:
+                # Type a little faster when the next line comes soon, never faster than a quick typist.
+                room = next_at - 700 - (at - 150) - 180
+                if 0 < room < keys[-1]:
+                    factor = max(room / keys[-1], KEY_MS_FAST / (keys[-1] / (len(keys) - 1)))
+                    keys = [round(k * factor, 1) for k in keys] if factor < 1 else keys
+            typing_ms = keys[-1] if keys else 0.0
+            pause = AUTOCOMPLETE_PAUSE if n_keys < len(text) else 180.0
             skip_click = omnibox_focused == tab["id"]
-            # Back-schedule from the moment the page should appear.
-            enter_ideal = at + LAND - LOAD
-            click_ideal = enter_ideal - 110 - typing_ms - (0 if skip_click else 90)
-            begin, shift = lead(click_ideal - (0 if skip_click else TRAVEL))
             a = g["address"]
             point = (a["x"] + a["w"] * 0.55, a["y"] + a["h"] / 2)  # clear of the typed text
+            if kind == "search":
+                t0_ideal = at - 150  # a query is typed while it's being said
+            else:
+                t0_ideal = at + LAND - LOAD - pause - typing_ms  # the page lands just after the word
+            click_ideal = t0_ideal - (REACT if skip_click else 90)
+            begin, shift = lead(click_ideal - (0 if skip_click else travel_ms(cursor, point) + DWELL))
             if skip_click:
                 click = begin
             else:
                 shot(begin, CAMERA_ZOOM, (a["x"] + a["w"] / 2, a["y"] + 170))
-                click = max(move(begin, point), click_ideal)  # no travel needed: still wait for the moment
+                click = max(move(begin, point) + DWELL, click_ideal)
                 press(click, point)
-            t0 = click + (0 if skip_click else 90)
+            t0 = click + (REACT if skip_click else 90)
             t1 = t0 + typing_ms
-            enter = t1 + 110
+            enter = t1 + pause
             loaded = enter + LOAD
             tracks["typing"].append({"t0": t0, "t1": t1, "enter": enter, "until": loaded, "tab": tab["id"],
-                                     "text": text, "kind": kind})
+                                     "text": text, "kind": kind, "keys": keys, "typed": n_keys})
             tracks["loading"].append({"t0": enter, "t1": loaded, "tab": tab["id"]})
             page_id = r.get("page")
             if page_id:
@@ -247,6 +305,7 @@ def build_scene(
             shot(loaded, 1.0)
             omnibox_focused = None
             end = loaded + 150
+            end_soft = enter + 120  # the hand can move on while the page loads
 
         elif kind == "click":
             box = r.get("box")
@@ -254,18 +313,18 @@ def build_scene(
             if box:
                 y_top = box["y"] - tab["scroll"]
                 needs_scroll = y_top < 40 or y_top + box["h"] > VIEW_H - 40
-                scroll_ms = 650.0 if needs_scroll else 0.0
-                begin, shift = lead(at - 90 - TRAVEL - scroll_ms)
+                scroll_ms = 750.0 if needs_scroll else 0.0
+                to = max(0.0, min(box["y"] - VIEW_H * 0.35, page_height(tab["page"]) - VIEW_H)) if needs_scroll else tab["scroll"]
+                point = (content["x"] + box["x"] + min(box["w"], 240) / 2, content["y"] + box["y"] - to + box["h"] / 2)
+                begin, shift = lead(at - 90 - DWELL - travel_ms(cursor, point) - scroll_ms)
                 travel_at = begin
                 if needs_scroll:
-                    to = max(0.0, min(box["y"] - VIEW_H * 0.35, page_height(tab["page"]) - VIEW_H))
                     tracks["scroll"].append({"t0": begin, "t1": begin + scroll_ms, "tab": tab["id"], "page": tab["page"],
                                              "from": tab["scroll"], "to": to})
                     tab["scroll"] = to
                     travel_at = begin + scroll_ms
-                point = (content["x"] + box["x"] + min(box["w"], 240) / 2, content["y"] + box["y"] - tab["scroll"] + box["h"] / 2)
                 shot(travel_at, CAMERA_ZOOM, point)
-                click = max(move(travel_at, point), at - 90)
+                click = max(move(travel_at, point) + DWELL, at - 90)
                 press(click, point)
                 end = click + PRESS
                 if page_id:
@@ -285,10 +344,10 @@ def build_scene(
             else:
                 to = max(0.0, min(float(to), max(page_height(tab["page"]) - VIEW_H, 0.0)))
                 inside = (content["x"] + content["w"] * 0.62, content["y"] + content["h"] * 0.5)
-                begin, shift = lead(at - 80 - (0 if _inside(cursor, content) else 450))
-                start_scroll = begin if _inside(cursor, content) else move(begin, inside, 450)
+                begin, shift = lead(at - 80 - (0 if _inside(cursor, content) else 500))
+                start_scroll = begin if _inside(cursor, content) else move(begin, inside, 500)
                 distance = abs(to - tab["scroll"])
-                dur = 650 + min(distance, 3000) / 3000 * 650  # a trackpad flick, then momentum
+                dur = 800 + min(distance, 3000) / 3000 * 900  # a trackpad swipe or two, then momentum
                 if distance > 1:
                     tracks["scroll"].append({"t0": start_scroll, "t1": start_scroll + dur, "tab": tab["id"], "page": tab["page"],
                                              "from": tab["scroll"], "to": to})
@@ -297,8 +356,8 @@ def build_scene(
 
         elif kind == "new_tab":
             point = plus_point(g, len(win["tabs"]))
-            begin, shift = lead(at - 90 - TRAVEL)
-            click = max(move(begin, point), at - 90)
+            begin, shift = lead(at - 90 - DWELL - travel_ms(cursor, point), soft=True)
+            click = max(move(begin, point) + DWELL, at - 90)
             press(click, point)
             t = new_tab(win)
             win["previous"], win["active"] = win["active"], len(win["tabs"]) - 1
@@ -315,8 +374,8 @@ def build_scene(
                 flags.append("no_such_tab")
             elif index != win["active"]:
                 point = tab_point(g, index)
-                begin, shift = lead(at - 90 - TRAVEL)
-                click = max(move(begin, point), at - 90)
+                begin, shift = lead(at - 90 - DWELL - travel_ms(cursor, point), soft=True)
+                click = max(move(begin, point) + DWELL, at - 90)
                 press(click, point)
                 win["previous"], win["active"] = win["active"], index
                 omnibox_focused = None
@@ -328,7 +387,7 @@ def build_scene(
                 flags.append("too_many_windows")
             else:
                 # ⌘N: no pointer travel; the window opens on a New Tab with the address bar focused.
-                begin, shift = lead(at - 120)
+                begin, shift = lead(at - 120, soft=True)
                 nw = {"id": f"w{len(windows)}", "index": len(windows), "tabs": [], "active": 0, "previous": 0}
                 windows.append(nw)
                 t = new_tab(nw)
@@ -350,8 +409,8 @@ def build_scene(
             elif index != front:
                 covering = [window_rect(w["index"]) for w in windows if w["index"] == front]
                 point = _visible_point(window_rect(index), covering)
-                begin, shift = lead(at - 90 - TRAVEL)
-                click = max(move(begin, point), at - 90)
+                begin, shift = lead(at - 90 - DWELL - travel_ms(cursor, point), soft=True)
+                click = max(move(begin, point) + DWELL, at - 90)
                 press(click, point)
                 previous_window, front = front, index
                 omnibox_focused = None
@@ -363,8 +422,8 @@ def build_scene(
                 flags.append("nothing_to_go_back_to")
             else:
                 point = g["back"]
-                begin, shift = lead(at - 90 - TRAVEL)
-                click = max(move(begin, point), at - 90)
+                begin, shift = lead(at - 90 - DWELL - travel_ms(cursor, point))
+                click = max(move(begin, point) + DWELL, at - 90)
                 press(click, point)
                 tab["history"] = tab["history"][:-1]
                 loaded = click + PRESS + 280  # back is served from cache
@@ -379,6 +438,7 @@ def build_scene(
         if flags:
             issues.append({"action_id": action["id"], "flags": sorted(set(flags)), "late_ms": round(max(shift, 0))})
         t_free = max(t_free, end)
+        t_soft = max(t_soft, end if end_soft is None else end_soft)
 
     if tracks["camera"]:
         tracks["camera"].insert(0, {"t": 0, "zoom": 1.0, "fx": STAGE_W / 2, "fy": STAGE_H / 2})
@@ -395,6 +455,8 @@ def build_scene(
         # A real screen recording: the pointer is on screen the whole time.
         "cursor": {"in": -1000, "out": duration_ms + 1000, "start": [CONTENT["x"] + CONTENT["w"] * 0.6, CONTENT["y"] + CONTENT["h"] * 0.55]},
         "clock_ms": clock_ms,
+        # A look cut from the user's own screenshot (skin.py), or None for the drawn one.
+        "skin": {"url": skin["url"], "version": skin["version"], "colors": skin["colors"]} if skin else None,
         "issues": issues,
         "results": {aid: {"page": r.get("page"), "link_text": r.get("link_text")} for aid, r in results.items()},
     }

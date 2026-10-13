@@ -120,6 +120,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #050b14; }
 .omnibox .rest { color: var(--muted); }
 .omnibox .placeholder { color: var(--muted); }
 .omnibox .caret { display: inline-block; width: 1.5px; height: 17px; margin-left: 1px; background: var(--text); }
+.omnibox .auto { color: #fff; background: #3d5a99; border-radius: 2px; }  /* inline completion, selected */
 .omnibox .end { display: flex; align-items: center; gap: 4px; flex: none; }
 .omnibox .end svg { width: 28px; height: 28px; padding: 6px; stroke: var(--icon); stroke-width: 1.8; fill: none; stroke-linejoin: round; stroke-linecap: round; }
 .omnibox.focus { background: var(--omni-focus); box-shadow: inset 0 0 0 2px var(--ring); }
@@ -179,3 +180,62 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #050b14; }
 #cursor { position: absolute; left: 0; top: 0; width: 26px; height: 26px; pointer-events: none; z-index: 100; opacity: 0; }
 #cursor svg { position: absolute; inset: 0; width: 100%; height: 100%; fill: #000; stroke: #fff;
   stroke-width: 1.6; stroke-linejoin: round; paint-order: stroke fill; filter: drop-shadow(0 1.5px 2px rgba(0, 0, 0, 0.45)); }
+
+/* ── Skin: layers cut from the user's own screenshot (skin.py) ──────────── */
+.skinned .wallpaper { object-fit: fill; }
+.window.skin { background: var(--toolbar); box-shadow: 0 22px 60px rgba(0, 0, 0, 0.45), 0 0 0 0.5px rgba(0, 0, 0, 0.75); }
+.window.skin > .base { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+.window.skin .tabstrip { background: transparent; }
+.window.skin .cover { position: absolute; background: var(--strip); }
+.window.skin .dim-lights { position: absolute; left: 20px; top: 13px; display: none; gap: 8px; }
+.window.skin .dim-lights i { width: 12.5px; height: 12.5px; border-radius: 50%; background: #5a5260; box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.08); }
+.window.skin.inactive .dim-lights { display: flex; }
+.window.skin.inactive .tabstrip::after { content: ""; position: absolute; inset: 0; background: rgba(255, 255, 255, 0.03); pointer-events: none; }
+.window.skin .plus-img { position: absolute; top: 8px; width: 23px; height: 23px; }
+.window.skin .nav-on { position: absolute; top: 49px; width: 32px; height: 26px; display: none; align-items: center; justify-content: center; background: var(--toolbar); }
+.window.skin .nav-on svg { width: 16px; height: 16px; stroke: var(--icon); stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.window.skin .back-on { left: 7px; }
+.window.skin .stop-on { left: 78px; }
+
+.tab.skin { padding: 6px 0 0 9px; align-items: flex-start; gap: 0; border-radius: 0; background: transparent !important; color: var(--muted); font-size: 12px; }
+.tab.skin::before, .tab.skin::after { display: none !important; }
+.tab.skin.active { color: var(--text); }
+.tab.skin .tbg { position: absolute; left: -6px; right: -5px; top: 0; bottom: 0; display: none; }
+.tab.skin.active .tbg { display: block; }
+.tab.skin .tbg .l { position: absolute; left: 0; top: 0; width: 13px; height: 35px; }
+.tab.skin .tbg .m { position: absolute; left: 13px; right: 15px; top: 0; bottom: 0; background-repeat: repeat-x; background-size: 1px 35px; }
+.tab.skin .tbg .r { position: absolute; right: 0; top: 0; width: 15px; height: 35px; }
+.tab.skin .clip { position: relative; gap: 7px; padding-right: 34px; height: 16px; }
+.tab.skin .title { line-height: 16px; }
+.tab.skin .ximg { position: absolute; right: 8px; top: 7px; width: 15px; height: 15px; padding: 0; }
+.tab.skin .sep { top: 9px; bottom: 12px; background: #4d4453; }
+
+.omni-skin { position: absolute; color: var(--text); font-size: 14px; white-space: nowrap; }
+.omni-skin .focus-img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: none; }
+.omni-skin .caret-cover { position: absolute; left: 35px; top: 8px; width: 10px; height: 22px; background: var(--omni); display: none; }
+.omni-skin .typed { position: absolute; left: 39px; top: 0; bottom: 0; right: 110px; display: none; align-items: center; overflow: hidden; }
+.omni-skin .caret { display: inline-block; width: 1.5px; height: 17px; margin-left: 1px; background: var(--text); }
+.omni-skin .auto { color: #fff; background: #4a5c9e; border-radius: 2px; }
+.omni-skin .pill { position: absolute; inset: 0; display: none; align-items: center; gap: 9px; padding: 0 8px 0 7px; border-radius: 19px;
+  background: var(--omni); box-shadow: 0 0 0 3px var(--toolbar); }
+.omni-skin .pill .chip { width: 24px; height: 24px; flex: none; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+.omni-skin .pill .chip.site { background: #4a414f; }
+.omni-skin .pill svg { width: 15px; height: 15px; stroke: var(--icon); stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.omni-skin .pill .text { flex: 1; min-width: 0; overflow: hidden; display: flex; }
+.omni-skin .pill .host { color: var(--text); }
+.omni-skin .pill .rest, .omni-skin .pill .placeholder { color: var(--muted); }
+.omni-skin .pill .end svg { width: 28px; height: 28px; padding: 6px; stroke-width: 1.8; }
+.omni-skin .suggest { position: absolute; left: 0; right: 0; top: calc(100% - 3px); padding: 6px 0 10px; display: none; z-index: 3;
+  background: var(--omni); border-radius: 0 0 18px 18px; box-shadow: 0 0 0 2px #d7b1fb, 0 16px 32px rgba(0, 0, 0, 0.45); clip-path: inset(0 -40px -60px -40px); }
+.omni-skin.open .suggest { display: block; }
+.omni-skin.open .focus-img { clip-path: inset(0 0 4px 0); }
+.omni-skin .suggest .row { display: flex; align-items: center; gap: 14px; height: 36px; padding: 0 16px; font-size: 14px; color: var(--text); }
+.omni-skin .suggest .row.sel { background: #463d4c; }
+.omni-skin .suggest .row b { font-weight: 600; }
+.omni-skin .suggest .row svg { width: 16px; height: 16px; flex: none; stroke: var(--icon); stroke-width: 2; fill: none; stroke-linecap: round; }
+.omni-skin .suggest .muted { color: var(--muted); }
+.window.skin .page.ntp img { width: 100%; height: 100%; }
+.tab.skin .xsvg { position: absolute; right: 8px; top: 7px; width: 15px; height: 15px; padding: 2px; display: none;
+  stroke: var(--muted); stroke-width: 2.2; fill: none; stroke-linecap: round; }
+.tab.skin:not(.active) .ximg { display: none; }
+.tab.skin:not(.active) .xsvg { display: block; }

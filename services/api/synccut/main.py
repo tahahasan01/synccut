@@ -25,6 +25,7 @@ from .core.subtitles import parse_subtitles
 from .core.timeline import DEFAULT_LAYOUT, apply_fit, finalize, take_clips
 from .jobs import Jobs
 from .netguard import BlockedURL, check_url
+from .skin import build_skin, load_skin, remove_skin
 from .store import NotFound, Store, new_id
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -53,13 +54,16 @@ MEDIA_HEADERS = {
 @app.middleware("http")
 async def harden_media(request: Request, call_next):
     response = await call_next(request)
-    if request.url.path.startswith("/media/"):
+    if request.url.path.startswith(("/media/", "/skins/")):
         response.headers.update(MEDIA_HEADERS)
     else:
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
     return response
 app.mount("/media", StaticFiles(directory=store.projects_dir), name="media")
 app.mount("/stage", StaticFiles(directory=Path(__file__).parent / "stage"), name="stage")
+SKINS_DIR = settings.data_dir / "skins"
+SKINS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/skins", StaticFiles(directory=SKINS_DIR), name="skins")
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
 
@@ -770,6 +774,48 @@ def web_url_or_error(value: str) -> str:
     if value and urlparse(value).scheme.lower() not in ("http", "https"):
         raise ValueError("Use a full web address starting with https://")
     return value
+
+
+# screen look ---------------------------------------------------------------------
+
+
+@app.get("/api/skin")
+def get_skin() -> dict:
+    skin = load_skin(SKINS_DIR)
+    return {"active": bool(skin), "version": skin["version"] if skin else None, "url": skin["url"] if skin else None}
+
+
+@app.post("/api/skin")
+async def upload_skin(file: UploadFile = File(...)) -> dict:
+    """A full-screen screenshot of the user's Mac with Chrome open on the New Tab page; the
+    generated video then shows that exact desktop, Dock, menu bar and Chrome toolbar."""
+    from .capture import raster_type
+
+    body = await file.read(MAX_SHOT_BYTES + 1)
+    if len(body) > MAX_SHOT_BYTES:
+        raise HTTPException(413, "That screenshot is over 25 MB.")
+    if raster_type(body) not in ("png", "jpg", "webp"):
+        raise HTTPException(422, "Use a PNG, JPEG or WebP screenshot.")
+    tmp = SKINS_DIR / "upload.bin"
+    tmp.write_bytes(body)
+    try:
+        info = media.probe(tmp)
+        if abs(info["width"] / max(info["height"], 1) - 16 / 9) > 0.03:
+            raise HTTPException(422, "Use a full-screen screenshot (16:9, like 1920x1080 or 3840x2160).")
+        build_skin(tmp, SKINS_DIR / "default")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(422, "Couldn't read that screenshot.")
+    finally:
+        tmp.unlink(missing_ok=True)
+    return get_skin()
+
+
+@app.delete("/api/skin")
+def delete_skin() -> dict:
+    remove_skin(SKINS_DIR)
+    return get_skin()
 
 
 @app.get("/api/brand")

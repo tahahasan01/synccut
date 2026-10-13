@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Card, Field, Notice, inputClass } from "@/components/ui";
-import { api, ApiError, type Brand } from "@/lib/api";
+import { api, API_URL, ApiError, type Brand, type Skin } from "@/lib/api";
 
 export default function BrandPage() {
   const [brand, setBrand] = useState<Brand | null>(null);
@@ -82,7 +82,10 @@ export default function BrandPage() {
         {error && <Notice tone="bad">{error}</Notice>}
         <Button type="submit">{saved ? "Saved" : "Save brand"}</Button>
       </form>
-      <SharePreview brand={brand} />
+      <div className="space-y-6">
+        <SharePreview brand={brand} />
+        <ScreenLook />
+      </div>
       </div>
     </main>
   );
@@ -131,5 +134,60 @@ function SharePreview({ brand }: { brand: Brand }) {
         </div>
       </div>
     </aside>
+  );
+}
+
+/** The generated browser can look exactly like the user's own Mac: desktop, Dock, menu bar, Chrome toolbar. */
+function ScreenLook() {
+  const [skin, setSkin] = useState<Skin | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ref = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    api.getSkin().then(setSkin, () => setSkin({ active: false, version: null, url: null }));
+  }, []);
+
+  async function run(fn: () => Promise<Skin>) {
+    setBusy(true);
+    setError(null);
+    try {
+      setSkin(await fn());
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section aria-labelledby="screen-look">
+      <h2 id="screen-look" className="mb-2 text-sm font-semibold text-muted">Your screen</h2>
+      <div className="space-y-3 rounded-xl border border-rule bg-surface p-4">
+        {skin?.active && skin.url && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={`${API_URL}${skin.url}desktop.png?v=${skin.version}`} alt="Your screen, as videos will show it"
+            className="w-full rounded-md border border-rule" />
+        )}
+        <p className="text-sm text-muted">
+          {skin?.active
+            ? "Videos use your own desktop, Dock, menu bar and Chrome toolbar. Re-export a video to apply a new screenshot."
+            : "Make videos look like your Mac. Open Chrome on a New Tab page (not full screen) and take a full-screen screenshot with \u2318\u21e73."}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant={skin?.active ? "secondary" : "primary"} disabled={busy} onClick={() => ref.current?.click()}>
+            {busy ? "Uploading…" : skin?.active ? "Replace screenshot" : "Upload a screenshot"}
+          </Button>
+          {skin?.active && <Button type="button" variant="ghost" disabled={busy} onClick={() => run(api.deleteSkin)}>Use the default look</Button>}
+        </div>
+        {error && <Notice tone="bad">{error}</Notice>}
+        <input ref={ref} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) run(() => api.uploadSkin(file));
+          }} />
+      </div>
+    </section>
   );
 }

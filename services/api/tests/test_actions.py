@@ -136,7 +136,7 @@ def test_screenshot_upload_replaces_capture_for_the_linked_page(tmp_path, monkey
         res = client.post(f"/api/projects/{pid}/page/screenshot", files={"file": ("a.png", png.read_bytes(), "image/png")})
         assert res.status_code == 200
         shot = res.json()["page_shot"]
-        assert shot["path"] == "page/shot.jpg" and shot["height"] == 2430  # 800x1200 scaled to the 1620 px page width
+        assert shot["path"] == "page/shot.jpg" and shot["height"] == 1906  # 800x1200 scaled to the 1270 px page width
         # changing the link drops the screenshot
         res = client.put(f"/api/projects/{pid}/page", json={"url": "https://example.com/other"})
         assert res.json()["page_shot"] is None

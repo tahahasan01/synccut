@@ -171,6 +171,8 @@ export type Brand = {
   portfolio: { title: string; url: string }[];
 };
 
+export type Skin = { active: boolean; version: number | null; url: string | null };
+
 export type Health = {
   ok: boolean;
   ffmpeg: boolean;
@@ -283,6 +285,13 @@ export const api = {
     return request<Project>(`/api/projects/${id}/page/screenshot`, { method: "POST", body: form });
   },
   deletePageShot: (id: string) => request<Project>(`/api/projects/${id}/page/screenshot`, { method: "DELETE" }),
+  getSkin: () => request<Skin>("/api/skin"),
+  uploadSkin: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<Skin>("/api/skin", { method: "POST", body: form });
+  },
+  deleteSkin: () => request<Skin>("/api/skin", { method: "DELETE" }),
   setPage: (id: string, url: string) => request<Project>(`/api/projects/${id}/page`, json("PUT", { url })),
   setMode: (id: string, mode: Project["mode"]) => request<Project>(`/api/projects/${id}/mode`, json("PUT", { mode })),
   prepare: (id: string, replan: boolean) => request<Job>(`/api/projects/${id}/prepare`, json("POST", { replan })),

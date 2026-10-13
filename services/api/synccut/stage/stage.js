@@ -162,6 +162,7 @@
   ];
 
   let S, L, tr;
+  let skinUrl = (name) => "";
   const dom = { windows: {}, tabs: {} };
   let perTab = {};
   const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -174,7 +175,121 @@
         .map(([l, t, c]) => `<div class="tile"><i>${l === "+" ? "+" : `<b style="background:${c}">${l}</b>`}</i>${t}</div>`).join("") + "</div>");
   }
 
+  /* A window cut from the user's own screenshot (skin.py): only what changes is drawn. */
+  function buildSkinWindow(win, camera, loads) {
+    const r = win.rect, C = S.skin.colors, o = L.omnibox;
+    const root = el("div", "window skin", camera);
+    Object.assign(root.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` });
+    // the theme's own colours (custom properties need setProperty; Object.assign ignores them)
+    for (const [k, v] of Object.entries({ strip: C.strip, toolbar: C.toolbar, omni: C.omni, text: C.text, muted: C.muted, icon: C.icon })) {
+      root.style.setProperty(`--${k}`, v);
+    }
+    const base = el("img", "base", root);
+    base.src = skinUrl("window");
+    loads.push(base.decode().catch(() => {}));
+
+    const strip = el("div", "tabstrip", root);
+    strip.style.height = `${L.tabstrip_h}px`;
+    const cover = el("div", "cover", strip);  // hides the screenshot's own tab and +
+    Object.assign(cover.style, { left: `${L.tab.left - 10}px`, top: "2px", width: "290px", height: `${L.tabstrip_h - 2}px` });
+    el("div", "dim-lights", strip, "<i></i><i></i><i></i>");
+    const plus = el("img", "plus-img", strip);
+    plus.src = skinUrl("plus");
+
+    const back = el("div", "nav-on back-on", root, ICON.back);
+    const stop = el("div", "nav-on stop-on", root, ICON.stop);
+
+    const omni = el("div", "omni-skin", root);
+    Object.assign(omni.style, { left: `${o.left}px`, top: `${o.top}px`, width: `${o.w}px`, height: `${o.h}px` });
+    const focusImg = el("img", "focus-img", omni);
+    focusImg.src = skinUrl("omni_focus");
+    const caretCover = el("div", "caret-cover", omni);
+    const typed = el("div", "typed", omni);
+    const pill = el("div", "pill", omni);
+    const pillLead = el("span", "chip", pill);
+    const pillText = el("div", "text", pill);
+    const pillEnd = el("span", "end", pill);
+    const suggest = el("div", "suggest", omni);
+
+    const content = el("div", "content", root);
+    Object.assign(content.style, { top: `${L.tabstrip_h + L.toolbar_h + L.bookmarks_h}px`, left: `${L.content_inset}px`, right: `${L.content_inset}px` });
+    const pages = {};
+    for (const [id, page] of Object.entries(S.pages)) {
+      let pr, img = null;
+      if (page.status === "start") {
+        pr = el("div", "page ntp", content);
+        img = el("img", "", pr);
+        img.src = skinUrl("ntp");
+      } else if (page.image) {
+        pr = el("div", "page", content);
+        img = el("img", "", pr);
+        img.src = ASSETS + page.image;
+      } else {
+        const host = splitUrl(page.url).host || "This site";
+        pr = el("div", "page placeholder-page", content,
+          `<div class="card"><svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#b9b7c2" stroke-width="1.5"><path d="M4 5h16v12H4ZM8 21h8M12 17v4"/><path d="m9 9 6 4M15 9l-6 4"/></svg>` +
+          `<b>This site can’t be reached</b><span>${esc(host)} took too long to respond.</span></div>`);
+      }
+      img && (img.alt = "", loads.push(img.decode().catch(() => {})));
+      pages[id] = { root: pr, img: page.status === "start" ? null : img };
+    }
+    dom.windows[win.id] = { skin: true, root, strip, plus, back, stop, omni, focusImg, caretCover, typed, pill, pillLead, pillText, pillEnd, suggest, pages };
+  }
+
+  function drawOmniboxSkin(w, active, shown, t, isFront) {
+    const typing = isFront && tr.typing.find((x) => x.tab === active && t >= x.t0 - 90 && t < x.enter);
+    const page = S.pages[shown.page];
+    const caretOn = Math.floor(t / 530) % 2 === 0;
+    const focused = Boolean(typing) || (isFront && !page.url);
+    w.focusImg.style.display = focused ? "block" : "none";
+    w.caretCover.style.display = focused ? "block" : "none";
+    w.pill.style.display = focused ? "none" : "flex";
+    w.typed.style.display = focused ? "flex" : "none";
+    w.omni.classList.toggle("open", false);
+    if (typing) {
+      let n = 0;
+      if (typing.keys) {
+        for (const k of typing.keys) if (t >= typing.t0 + k) n++;
+      } else {
+        n = t < typing.t0 ? 0 : Math.round(clamp((t - typing.t0) / (typing.t1 - typing.t0)) * typing.text.length);
+      }
+      const isSearch = typing.kind === "search";
+      const text = typing.text.slice(0, n);
+      const completion = !isSearch && n >= 2 ? typing.text.slice(n) : "";
+      const caret = !completion && caretOn;
+      w.typed.innerHTML = `<span>${esc(text)}</span>${caret ? '<span class="caret"></span>' : ""}${completion ? `<span class="auto">${esc(completion)}</span>` : ""}`;
+      w.omni.classList.toggle("open", n > 0);
+      if (n > 0) {
+        w.suggest.innerHTML = isSearch
+          ? `<div class="row sel">${ICON.search}<span>${esc(text)}</span><span class="muted">– Google Search</span></div>` +
+            `<div class="row">${ICON.search}<span>${esc(text)} <span class="muted">near me</span></span></div>` +
+            `<div class="row">${ICON.search}<span>${esc(text)} <span class="muted">examples</span></span></div>`
+          : `<div class="row sel">${ICON.globe}<span><b>${esc(text)}</b>${esc(completion)}</span></div>` +
+            `<div class="row">${ICON.search}<span>${esc(text)}</span><span class="muted">– Google Search</span></div>`;
+      }
+      return `T${n}${caret ? "|" : ""}${completion ? "c" : ""}`;
+    }
+    if (focused) {  // a fresh tab: the screenshot's own focused omnibox, with a blinking caret
+      w.typed.innerHTML = caretOn ? '<span class="caret"></span>' : "";
+      return `F${caretOn ? "|" : ""}`;
+    }
+    if (!page.url) {
+      w.pillLead.className = "chip";
+      w.pillLead.innerHTML = ICON.search;
+      w.pillText.innerHTML = '<span class="placeholder">Search Google or type a URL</span>';
+      w.pillEnd.innerHTML = "";
+      return "P";
+    }
+    const u = splitUrl(page.url);
+    w.pillLead.className = "chip site";
+    w.pillLead.innerHTML = ICON.tune;
+    w.pillText.innerHTML = `<span class="host">${esc(u.host)}</span><span class="rest">${esc(u.rest)}</span>`;
+    w.pillEnd.innerHTML = ICON.star;
+    return `U${shown.page}`;
+  }
+
   function buildWindow(win, camera, loads) {
+    if (S.skin) return buildSkinWindow(win, camera, loads);
     const r = win.rect;
     const root = el("div", "window", camera);
     Object.assign(root.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` });
@@ -258,6 +373,23 @@
     stage.innerHTML = "";
     const camera = el("div", "", stage);
     camera.id = "camera";
+    const loads = [];
+    if (S.skin) {
+      // The user's own desktop: wallpaper, menu bar and Dock exactly as in their screenshot.
+      const root = new URL(S.skin.url, location.href).href.replace(/\/?$/, "/");
+      skinUrl = (name) => `${root}${name}.png?v=${S.skin.version}`;
+      stage.classList.add("skinned");
+      const desk = el("img", "wallpaper", camera);
+      desk.src = skinUrl("desktop");
+      loads.push(desk.decode().catch(() => {}));
+      dom.clock = null;
+      for (const win of S.windows) buildWindow(win, camera, loads);
+      buildTabs(loads);
+      dom.camera = camera;
+      dom.cursor = el("div", "", stage, '<svg viewBox="0 0 24 24"><path d="M5.5 2.8v16.6l4.1-3.9 2.7 6 2.9-1.3-2.7-5.9 5.6-.3Z"/></svg>');
+      dom.cursor.id = "cursor";
+      return Promise.all(loads);
+    }
     camera.innerHTML = WALLPAPER;
 
     const menubar = el("div", "menubar", camera,
@@ -272,25 +404,8 @@
     menubar.style.height = `${L.menubar_h}px`;
     dom.clock = menubar.querySelector(".clock");
 
-    const loads = [];
     for (const win of S.windows) buildWindow(win, camera, loads);
-
-    // tabs live in their window's strip
-    for (const t of S.tabs) {
-      const w = dom.windows[t.win];
-      const root = el("div", "tab", w.strip,
-        '<span class="clip"><span class="fav globe"></span><span class="title"></span></span>' + ICON.x + '<span class="sep"></span>');
-      Object.assign(root.style, { top: `${L.tab.top}px`, height: `${L.tabstrip_h - L.tab.top}px`, display: "none" });
-      dom.tabs[t.id] = { root, clip: root.querySelector(".clip"), fav: root.querySelector(".fav"), title: root.querySelector(".title"),
-        x: root.querySelector(".x"), sep: root.querySelector(".sep"), favKey: null, win: t.win };
-    }
-    for (const page of Object.values(S.pages)) {
-      if (page.favicon) {
-        const pre = new Image();
-        pre.src = ASSETS + page.favicon;
-        loads.push(pre.decode().catch(() => {}));
-      }
-    }
+    buildTabs(loads);
 
     const d = L.dock;
     const dock = el("div", "dock", camera);
@@ -309,6 +424,28 @@
     dom.cursor = el("div", "", stage, '<svg viewBox="0 0 24 24"><path d="M5.5 2.8v16.6l4.1-3.9 2.7 6 2.9-1.3-2.7-5.9 5.6-.3Z"/></svg>');
     dom.cursor.id = "cursor";
     return Promise.all(loads);
+  }
+
+  // tabs live in their window's strip
+  function buildTabs(loads) {
+    for (const t of S.tabs) {
+      const w = dom.windows[t.win];
+      const html = S.skin
+        ? `<span class="tbg"><img class="l" src="${skinUrl("tab_l")}"><span class="m" style="background-image:url('${skinUrl("tab_m")}')"></span><img class="r" src="${skinUrl("tab_r")}"></span>` +
+          `<span class="clip"><span class="fav globe"></span><span class="title"></span></span><img class="x ximg" src="${skinUrl("tab_x")}">${ICON.x.replace('class="x"', 'class="xsvg"')}<span class="sep"></span>`
+        : '<span class="clip"><span class="fav globe"></span><span class="title"></span></span>' + ICON.x + '<span class="sep"></span>';
+      const root = el("div", `tab${S.skin ? " skin" : ""}`, w.strip, html);
+      Object.assign(root.style, { top: `${L.tab.top}px`, height: `${S.skin ? 35 : L.tabstrip_h - L.tab.top}px`, display: "none" });
+      dom.tabs[t.id] = { root, clip: root.querySelector(".clip"), fav: root.querySelector(".fav"), title: root.querySelector(".title"),
+        x: root.querySelector(".x"), sep: root.querySelector(".sep"), favKey: null, win: t.win };
+    }
+    for (const page of Object.values(S.pages)) {
+      if (page.favicon) {
+        const pre = new Image();
+        pre.src = ASSETS + page.favicon;
+        loads.push(pre.decode().catch(() => {}));
+      }
+    }
   }
 
   /* ── state at time t ─────────────────────────────────────────────────── */
@@ -397,23 +534,35 @@
   function drawOmnibox(w, active, shown, t, opened) {
     const typing = tr.typing.find((x) => x.tab === active && t >= x.t0 - 90 && t < x.enter);
     if (typing) {
-      const n = t < typing.t0 ? 0 : Math.round(clamp((t - typing.t0) / (typing.t1 - typing.t0)) * typing.text.length);
+      // one key at a time, at the human rhythm planned for this text
+      let n = 0;
+      if (typing.keys) {
+        for (const k of typing.keys) if (t >= typing.t0 + k) n++;
+      } else {
+        n = t < typing.t0 ? 0 : Math.round(clamp((t - typing.t0) / (typing.t1 - typing.t0)) * typing.text.length);
+      }
+      const isSearch = typing.kind === "search";
       const typed = typing.text.slice(0, n);
-      const caret = Math.floor(t / 530) % 2 === 0;
+      // Chrome completes a familiar address inline, shown selected, after the first keys
+      const completion = !isSearch && n >= 2 ? typing.text.slice(n) : "";
+      const caret = !completion && Math.floor(t / 530) % 2 === 0;
       w.omni.classList.add("focus");
       w.omni.classList.toggle("open", n > 0);
       w.omniLead.className = "chip";
       w.omniLead.innerHTML = ICON.search;
-      w.omniText.innerHTML = `<span class="host">${esc(typed)}</span>${caret ? '<span class="caret"></span>' : ""}`;
+      w.omniText.innerHTML = `<span class="host">${esc(typed)}</span>${caret ? '<span class="caret"></span>' : ""}` +
+        (completion ? `<span class="auto">${esc(completion)}</span>` : "");
       w.omniEnd.innerHTML = "";
       if (n > 0) {
-        const isSearch = typing.kind === "search";
-        w.suggest.innerHTML =
-          `<div class="row sel">${isSearch ? ICON.search : ICON.globe}<span>${esc(typed)}</span><span class="muted">${isSearch ? "– Search" : ""}</span></div>` +
-          (isSearch ? `<div class="row">${ICON.search}<span>${esc(typed)} <span class="muted">near me</span></span></div>` +
-            `<div class="row">${ICON.search}<span>${esc(typed)} <span class="muted">examples</span></span></div>` : "");
+        const full = typed + completion;
+        w.suggest.innerHTML = isSearch
+          ? `<div class="row sel">${ICON.search}<span>${esc(typed)}</span><span class="muted">– Search</span></div>` +
+            `<div class="row">${ICON.search}<span>${esc(typed)} <span class="muted">near me</span></span></div>` +
+            `<div class="row">${ICON.search}<span>${esc(typed)} <span class="muted">examples</span></span></div>`
+          : `<div class="row sel">${ICON.globe}<span><b style="font-weight:600">${esc(typed)}</b>${esc(full.slice(typed.length))}</span></div>` +
+            `<div class="row">${ICON.search}<span>${esc(typed)}</span><span class="muted">– Search</span></div>`;
       }
-      return `T${n}${caret ? "|" : ""}`;
+      return `T${n}${caret ? "|" : ""}${completion ? "c" : ""}`;
     }
     w.omni.classList.remove("focus", "open");
     const page = S.pages[shown.page];
@@ -438,8 +587,8 @@
   function seek(t) {
     const cam = cameraAt(t);
     dom.camera.style.transform = `translate(${W / 2 - cam.cx * cam.z}px, ${H / 2 - cam.cy * cam.z}px) scale(${cam.z})`;
-    const clock = clockText(t);
-    dom.clock.textContent = clock;
+    const clock = dom.clock ? clockText(t) : "";
+    if (dom.clock) dom.clock.textContent = clock;
     const sig = [cam.z.toFixed(4), cam.cx.toFixed(1), cam.cy.toFixed(1), clock];
 
     // window stacking: most recently focused on top
@@ -485,7 +634,7 @@
         x += width + L.tab.gap;
         sig.push(`${ev.id}:${Math.round(width)}${ev.id === active ? "a" : ""}${loading ? `L${spin}` : ""}${pageOf(ev.id, t).page}`);
       });
-      w.plus.style.left = `${x + 4}px`;
+      w.plus.style.left = w.skin ? `${x - L.tab.gap + 9}px` : `${x + 4}px`;
 
       const shown = pageOf(active, t);
       const scroll = scrollOf(active, shown, t);
@@ -493,11 +642,18 @@
       const pageDom = w.pages[shown.page];
       if (pageDom && pageDom.img) pageDom.img.style.transform = `translateY(${-Math.round(scroll)}px)`;
       const history = (perTab[active] || []).filter((e) => e.t <= t).length;
-      w.back.classList.toggle("dim", history < 2);
       const activeLoading = loads.some((l) => l.tab === active);
-      w.reload.innerHTML = activeLoading ? ICON.stop : ICON.reload;
-      const opened = (tabsHere.find((e) => e.id === active) || { t: 0 }).t;
-      const omniSig = win.id === front ? drawOmnibox(w, active, shown, t, opened) : drawOmnibox(w, active, shown, -1e9, opened);
+      let omniSig;
+      if (w.skin) {
+        w.back.style.display = history >= 2 ? "flex" : "none";
+        w.stop.style.display = activeLoading ? "flex" : "none";
+        omniSig = drawOmniboxSkin(w, active, shown, t, win.id === front);
+      } else {
+        w.back.classList.toggle("dim", history < 2);
+        w.reload.innerHTML = activeLoading ? ICON.stop : ICON.reload;
+        const opened = (tabsHere.find((e) => e.id === active) || { t: 0 }).t;
+        omniSig = win.id === front ? drawOmnibox(w, active, shown, t, opened) : drawOmnibox(w, active, shown, -1e9, opened);
+      }
       sig.push(`${win.id}${win.id === front ? "*" : ""}${q.toFixed(3)}:${shown.page}:${Math.round(scroll)}:${omniSig}:${history}:${activeLoading}`);
     }
 
