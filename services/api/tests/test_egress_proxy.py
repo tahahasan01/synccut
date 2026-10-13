@@ -197,3 +197,25 @@ def test_chunked_and_upgrade_requests_are_refused():
     with EgressProxy() as proxy:
         assert raw(proxy.port, b"POST http://8.8.8.8/ HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n").startswith(b"HTTP/1.1 400")
         assert raw(proxy.port, b"GET http://8.8.8.8/ HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n").startswith(b"HTTP/1.1 400")
+
+
+@pytest.mark.parametrize("address", ["::7f00:1", "::a00:1", "::a9fe:a9fe"])  # IPv4-compatible forms
+def test_ipv4_compatible_ipv6_is_refused(address):
+    assert netguard._is_public_ip(ipaddress.ip_address(address)) is False
+
+
+@pytest.mark.parametrize("request_bytes", [
+    b"GET http://127.0.0.1\@8.8.8.8/ HTTP/1.1\r\n\r\n",          # backslash authority trick
+    b"GET http://8.8.8.8@127.0.0.1/ HTTP/1.1\r\n\r\n",             # userinfo
+    b"GET http://8.8.8.8/ HTTP/1.1 extra\r\n\r\n",                 # malformed request line
+    b"get http://8.8.8.8/ HTTP/1.1\r\n\r\n",                       # non-canonical method
+    b"GET http://8.8.8.8/ HTTP/1.1\r\nX: a\r\n Transfer-Encoding: chunked\r\n\r\n",  # obs-fold
+    b"GET http://8.8.8.8/ HTTP/1.1\r\nTransfer-Encoding : chunked\r\n\r\n",          # space before colon
+    b"POST http://8.8.8.8/ HTTP/1.1\r\nContent-Length: +5\r\n\r\n",                  # non-digit length
+    b"CONNECT 127.0.0.1:443@8.8.8.8:443 HTTP/1.1\r\n\r\n",
+    b"CONNECT 8.8.8.8 HTTP/1.1\r\n\r\n",                           # no port
+    b"GET http://8.8.8.8/\x00 HTTP/1.1\r\n\r\n",
+])
+def test_ambiguous_requests_are_refused(request_bytes):
+    with EgressProxy() as proxy:
+        assert raw(proxy.port, request_bytes).startswith((b"HTTP/1.1 400", b"HTTP/1.1 403"))

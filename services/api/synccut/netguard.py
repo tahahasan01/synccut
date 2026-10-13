@@ -38,6 +38,8 @@ def _embedded_ipv4(ip: ipaddress.IPv6Address) -> ipaddress.IPv4Address | None:
     """IPv4 address carried inside an IPv6 one (mapped, 6to4, Teredo, NAT64), if any."""
     if ip.ipv4_mapped:
         return ip.ipv4_mapped
+    if int(ip) >> 32 == 0 and int(ip) > 1:  # deprecated IPv4-compatible form, e.g. ::127.0.0.1
+        return ipaddress.IPv4Address(int(ip))
     if ip.sixtofour:
         return ip.sixtofour
     if ip.teredo:
@@ -53,7 +55,12 @@ def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         inner = _embedded_ipv4(ip)
         if inner is not None:
             return _is_public_ip(inner)
-    return ip.is_global and not ip.is_multicast and ip not in ipaddress.ip_network("100.64.0.0/10")
+    # is_global alone is not enough: Python reports e.g. ::7f00:1 as global. Require it AND
+    # none of the special-purpose flags.
+    return ip.is_global and not (
+        ip.is_private or ip.is_reserved or ip.is_loopback or ip.is_link_local
+        or ip.is_multicast or ip.is_unspecified or ip in ipaddress.ip_network("100.64.0.0/10")
+    )
 
 
 _lock = threading.Lock()
@@ -126,6 +133,15 @@ def guard_context(context) -> None:
 # re-resolved behind our back.
 
 ALLOWED_PORTS = {80, 443, 8080, 8443}
+
+import re  # noqa: E402
+
+# Strict grammar: what we validate must be exactly what gets connected to and sent upstream.
+_REQUEST_LINE = re.compile(r"(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS|CONNECT) ([!-~]+) (HTTP/1\.[01])")
+_HEADER_LINE = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+:[	 -~]*")  # token ":" visible ASCII; no obs-fold
+_HOST = r"(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?)*\.?)"
+_AUTHORITY = re.compile(_HOST + r":(\d{1,5})")
+_AUTHORITY_OPTIONAL_PORT = re.compile(_HOST + r"(?::(\d{1,5}))?")
 _HEAD_LIMIT = 64 * 1024
 _FORBIDDEN = b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 9\r\nConnection: close\r\n\r\nForbidden"
 _BAD_REQUEST = b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -133,7 +149,13 @@ _BAD_GATEWAY = b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: cl
 
 
 async def resolve_pinned(host: str, port: int) -> str | None:
-    """Resolve once; return an address to connect to, or None if the destination isn't allowed."""
+    """Resolve once; return the first allowed address, or None if the destination isn't allowed."""
+    addresses = await resolve_allowed(host, port)
+    return addresses[0] if addresses else None
+
+
+async def resolve_allowed(host: str, port: int) -> list[str] | None:
+    """Resolve once and return every address (all checked), or None if the destination isn't allowed."""
     import asyncio
 
     host = (host or "").strip("[]").lower().rstrip(".")
@@ -143,7 +165,7 @@ async def resolve_pinned(host: str, port: int) -> str | None:
         return None
     try:
         literal = ipaddress.ip_address(host)
-        return str(literal) if (allow_private() or _is_public_ip(literal)) else None
+        return [str(literal)] if (allow_private() or _is_public_ip(literal)) else None
     except ValueError:
         pass
     try:
@@ -155,8 +177,21 @@ async def resolve_pinned(host: str, port: int) -> str | None:
         return None
     if not allow_private() and not all(_is_public_ip(ipaddress.ip_address(a.split("%")[0])) for a in addresses):
         return None  # one internal record is enough to refuse the whole name
-    addresses.sort(key=lambda a: ":" in a)  # prefer IPv4
-    return addresses[0]
+    addresses = sorted(dict.fromkeys(addresses), key=lambda a: ":" in a)  # unique, IPv4 first
+    return addresses
+
+
+async def _connect_any(addresses: list[str], port: int):
+    """Connect to the first reachable address; every candidate was already checked."""
+    import asyncio
+
+    last: Exception | None = None
+    for address in addresses[:4]:
+        try:
+            return await asyncio.wait_for(asyncio.open_connection(address, port), 12 if address == addresses[0] else 6)
+        except Exception as exc:
+            last = exc
+    raise last or OSError("no address")
 
 
 async def _pipe(reader, writer) -> None:
@@ -195,22 +230,25 @@ async def _handle(reader, writer) -> None:
         writer.write(_BAD_REQUEST)
         writer.close()
         return
-    lines = head.decode("latin-1").split("\r\n")
-    try:
-        method, target, version = lines[0].split(" ", 2)
-    except ValueError:
-        writer.write(_BAD_REQUEST)
-        writer.close()
+    lines = head[:-4].decode("latin-1").split("\r\n")
+    match = _REQUEST_LINE.fullmatch(lines[0])
+    if not match or not all(_HEADER_LINE.fullmatch(h) for h in lines[1:]):
+        await _refuse(writer, _BAD_REQUEST)  # anything ambiguous is refused, never "interpreted"
         return
+    method, target, version = match.groups()
 
-    if method.upper() == "CONNECT":  # HTTPS and WebSockets: a TLS tunnel bound to one host
-        host, port = _split_host_port(target, 443)
-        address = await resolve_pinned(host, port)
-        if address is None:
+    if method == "CONNECT":  # HTTPS and WebSockets: a TLS tunnel bound to one host
+        authority = _AUTHORITY.fullmatch(target)
+        if not authority:
+            await _refuse(writer, _BAD_REQUEST)
+            return
+        host, port = authority.group(1).strip("[]"), int(authority.group(2))
+        addresses = await resolve_allowed(host, port)
+        if not addresses:
             await _refuse(writer, _FORBIDDEN)
             return
         try:
-            up_reader, up_writer = await asyncio.wait_for(asyncio.open_connection(address, port), 15)
+            up_reader, up_writer = await _connect_any(addresses, port)
         except Exception:
             await _refuse(writer, _BAD_GATEWAY)
             return
@@ -222,10 +260,11 @@ async def _handle(reader, writer) -> None:
     # piped to the server, so a second (pipelined) request for another host can't ride
     # along to this one, and the Host header is rewritten to the URL being fetched.
     parsed = urlparse(target)
-    if parsed.scheme.lower() != "http" or not parsed.hostname or parsed.username or parsed.password:
+    netloc = _AUTHORITY_OPTIONAL_PORT.fullmatch(parsed.netloc or "")
+    if parsed.scheme != "http" or not netloc or (parsed.path and not parsed.path.startswith("/")):
         await _refuse(writer, _BAD_REQUEST)
         return
-    host, port = parsed.hostname, parsed.port or 80
+    host, port = netloc.group(1).strip("[]").lower(), int(netloc.group(2) or 80)
     headers = [h for h in lines[1:] if h]
     names = [h.split(":", 1)[0].strip().lower() for h in headers]
     if "transfer-encoding" in names or "upgrade" in names:
@@ -234,16 +273,16 @@ async def _handle(reader, writer) -> None:
     length = 0
     for h in headers:
         if h.lower().startswith("content-length:"):
-            try:
-                length = int(h.split(":", 1)[1].strip())
-            except ValueError:
+            value = h.split(":", 1)[1].strip()
+            if not value.isdigit():
                 await _refuse(writer, _BAD_REQUEST)
                 return
+            length = int(value)
     if names.count("content-length") > 1 or length < 0 or length > 50 * 1024 * 1024:
         await _refuse(writer, _BAD_REQUEST)
         return
-    address = await resolve_pinned(host, port)
-    if address is None:
+    addresses = await resolve_allowed(host, port)
+    if not addresses:
         await _refuse(writer, _FORBIDDEN)
         return
     authority = host if port == 80 else f"{host}:{port}"
@@ -255,17 +294,65 @@ async def _handle(reader, writer) -> None:
     head_out = f"{method} {path} {version}\r\nHost: {authority}\r\n" + "".join(f"{h}\r\n" for h in kept) + "Connection: close\r\n\r\n"
     try:
         body = await asyncio.wait_for(reader.readexactly(length), 30) if length else b""
-        up_reader, up_writer = await asyncio.wait_for(asyncio.open_connection(address, port), 15)
+        up_reader, up_writer = await _connect_any(addresses, port)
     except Exception:
         await _refuse(writer, _BAD_GATEWAY)
         return
     up_writer.write(head_out.encode("latin-1") + body)
     await up_writer.drain()
-    await _pipe(up_reader, writer)  # response only; then both sides close
     try:
-        up_writer.close()
+        # Relay exactly one response (servers often ignore "Connection: close"),
+        # then close both sides.
+        await asyncio.wait_for(_relay_one_response(up_reader, writer, method.upper() == "HEAD"), 120)
     except Exception:
         pass
+    for w in (up_writer, writer):
+        try:
+            w.close()
+        except Exception:
+            pass
+
+
+async def _relay_one_response(reader, writer, head_request: bool) -> None:
+    head = await reader.readuntil(b"\r\n\r\n")
+    status_line, *header_lines = head.decode("latin-1").split("\r\n")
+    status = int(status_line.split(" ", 2)[1])
+    fields = {}
+    for h in header_lines:
+        if ":" in h:
+            k, v = h.split(":", 1)
+            fields[k.strip().lower()] = v.strip()
+    # Tell the browser this connection ends here, whatever the server said.
+    kept = [h for h in header_lines if h and not h.lower().startswith(("connection:", "keep-alive:", "proxy-connection:"))]
+    writer.write((status_line + "\r\n" + "".join(f"{h}\r\n" for h in kept) + "Connection: close\r\n\r\n").encode("latin-1"))
+    if head_request or status in (204, 304) or 100 <= status < 200:
+        return
+    if "chunked" in fields.get("transfer-encoding", "").lower():
+        while True:
+            size_line = await reader.readuntil(b"\r\n")
+            writer.write(size_line)
+            size = int(size_line.split(b";")[0].strip() or b"0", 16)
+            if size == 0:
+                while (trailer := await reader.readuntil(b"\r\n")) != b"\r\n":
+                    writer.write(trailer)
+                writer.write(b"\r\n")
+                break
+            writer.write(await reader.readexactly(size + 2))  # chunk + CRLF
+            await writer.drain()
+    elif "content-length" in fields:
+        remaining = int(fields["content-length"])
+        while remaining > 0:
+            chunk = await reader.read(min(65536, remaining))
+            if not chunk:
+                break
+            writer.write(chunk)
+            remaining -= len(chunk)
+            await writer.drain()
+    else:
+        while chunk := await reader.read(65536):  # delimited by close
+            writer.write(chunk)
+            await writer.drain()
+    await writer.drain()
 
 
 async def _refuse(writer, response: bytes) -> None:
@@ -294,6 +381,11 @@ class EgressProxy:
         def run() -> None:
             self._loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self._loop)
+            # Peers resetting connections is routine for a proxy; don't log it as an error.
+            def quiet(loop, context):
+                if not isinstance(context.get("exception"), (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
+                    loop.default_exception_handler(context)
+            self._loop.set_exception_handler(quiet)
             self._server = self._loop.run_until_complete(asyncio.start_server(_handle, "127.0.0.1", 0, limit=_HEAD_LIMIT))
             self.port = self._server.sockets[0].getsockname()[1]
             ready.set()
@@ -308,8 +400,15 @@ class EgressProxy:
     def __exit__(self, *exc) -> None:
         if self._loop is None:
             return
-        self._loop.call_soon_threadsafe(self._server.close)
-        self._loop.call_soon_threadsafe(self._loop.stop)
+        import asyncio
+
+        async def shutdown() -> None:
+            self._server.close()
+            for task in [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]:
+                task.cancel()
+            self._loop.stop()
+
+        asyncio.run_coroutine_threadsafe(shutdown(), self._loop)
         self._thread.join(5)
 
     @property
