@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "SyncCut Recorder Helper",
+  "version": "0.1.0",
+  "description": "While a SyncCut take is recording: logs tab, navigation and click events, and adds a next-step hotkey. Nothing is collected otherwise.",
+  "permissions": ["tabs", "webNavigation", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost:3000/*", "http://127.0.0.1:3000/*"],
+      "js": ["bridge.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "exclude_matches": ["http://localhost:3000/*", "http://127.0.0.1:3000/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "next-beat": {
+      "suggested_key": { "default": "Alt+Shift+N" },
+      "description": "Mark the start of the next step"
+    }
+  },
+  "action": { "default_title": "SyncCut", "default_popup": "popup.html" }
+}

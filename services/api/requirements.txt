@@ -1,0 +1,9 @@
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+faster-whisper==1.2.1
+ctranslate2==4.4.0
+anthropic==1.13.0
+pytest==9.1.1
+playwright==1.63.0
+claude-agent-sdk==0.2.165

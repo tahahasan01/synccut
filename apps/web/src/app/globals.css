@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+/* SyncCut tokens.
+   Paper and ink for the work surface; one accent, cue yellow, used only for
+   "this is a cue" and "this is being spoken now" (subtitle / timecode yellow). */
+@theme {
+  --color-paper: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-ink: #161a23;
+  --color-ink-soft: #2a303c;
+  --color-muted: #5e6675;
+  --color-rule: #dde1e7;
+  --color-rule-strong: #c4cad3;
+  --color-cue: #ffd338;
+  --color-cue-soft: #fff4c7;
+  --color-signal: #e5484d;
+  --color-signal-soft: #fdecec;
+  --color-go: #2f9e6a;
+  --color-go-soft: #e6f5ee;
+  --color-monitor: #10131a;
+
+  --font-sans: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  --font-script: var(--font-courier), "Courier New", ui-monospace, monospace;
+
+  --radius-control: 6px;
+  --radius-panel: 10px;
+}
+
+html { background: var(--color-paper); }
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01" 1;
+}
+
+/* Timecodes and counters line up. */
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Visible keyboard focus everywhere; mouse clicks stay quiet. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+::selection { background: var(--color-cue); color: var(--color-ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
