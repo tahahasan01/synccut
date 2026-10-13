@@ -81,7 +81,7 @@ LINKS_JS = """() => [...document.querySelectorAll('a[href], button, [role=button
              href: el.href || '', x: r.x + scrollX, y: r.y + scrollY, w: r.width, h: r.height }; })
   .filter(l => l.w > 4 && l.h > 4 && l.text && l.y < %d).slice(0, 400)""" % MAX_PAGE_H
 
-CAPTURE_VERSION = 6  # 6: the window of a real macOS Chrome screenshot, 1270x741 viewport
+CAPTURE_VERSION = 7  # 7: no bookmarks bar, 1270x779 viewport
 
 # "scroll to the history section" means the section, not the first word "history" on the
 # page (often a nav link at the top): prefer headings, then matches below the first screen.

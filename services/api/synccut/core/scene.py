@@ -24,12 +24,12 @@ from urllib.parse import urlparse
 STAGE_W, STAGE_H = 1920, 1080
 MENUBAR_H = 24
 WINDOW = {"x": 293, "y": 91, "w": 1272, "h": 862}
-TABSTRIP_H, TOOLBAR_H, BOOKMARKS_H = 39, 42, 40  # bookmarks bar includes its 1 px divider
+TABSTRIP_H, TOOLBAR_H, BOOKMARKS_H = 39, 42, 2  # no bookmarks bar: just the divider above the page
 CHROME_H = TABSTRIP_H + TOOLBAR_H + BOOKMARKS_H
 CONTENT_INSET = 1  # the window's 1 px border
 VIEW_W, VIEW_H = WINDOW["w"] - 2 * CONTENT_INSET, WINDOW["h"] - CHROME_H  # captured pages are rendered at exactly this size
 TAB_LEFT, TAB_W, TAB_TOP, TAB_GAP = 126, 232, 5, 1  # within the window; TAB_LEFT/W are the tab body
-OMNI_LEFT, OMNI_W, OMNI_TOP, OMNI_H = 118, 622, 43, 38
+OMNI_LEFT, OMNI_W, OMNI_TOP, OMNI_H = 118, 998, 43, 38  # wide: only two extensions beside it
 OMNI_RIGHT = WINDOW["w"] - OMNI_LEFT - OMNI_W
 DOCK = {"icon": 56, "gap": 12, "h": 76, "y": STAGE_H - 76 - 4}
 # A second or third window opens offset from the first, like macOS cascades them

@@ -312,9 +312,9 @@
     const omniEnd = el("span", "end", omni);
     const suggest = el("div", "suggest", omni);
     el("div", "tools", toolbar,
-      EXTENSIONS.map((g) => `<span class="ext"><svg viewBox="0 0 24 24">${g}</svg></span>`).join("") +
+      EXTENSIONS.slice(0, 2).map((g) => `<span class="ext"><svg viewBox="0 0 24 24">${g}</svg></span>`).join("") +
       '<svg viewBox="0 0 24 24"><path d="M10 4h4v3a2 2 0 1 0 4 0V4h2v6h-3a2 2 0 1 0 0 4h3v6h-6v-3a2 2 0 1 0-4 0v3H4v-6h3a2 2 0 1 0 0-4H4V4h6Z"/></svg>' +
-      `<span class="avatar">${AVATAR}</span><svg viewBox="0 0 24 24"><circle cx="12" cy="5.5" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="12" cy="18.5" r="1.2"/></svg>`);
+      `<svg viewBox="0 0 24 24"><circle cx="12" cy="5.5" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="12" cy="18.5" r="1.2"/></svg>`);
 
     const folder = '<svg viewBox="0 0 24 24"><path d="M3 6h7l2 2.5h9V19H3Z"/></svg>';
     const bm = el("div", "bookmarks", root,
@@ -325,6 +325,7 @@
         .map(([c, g, t]) => `<span class="bm"><i style="background:${c}">${esc(g)}</i>${esc(t)}</span>`).join("") +
       `<span class="bm">${folder}Useful tools</span><span class="bm right">${folder}All Bookmarks</span>`);
     Object.assign(bm.style, { top: `${L.tabstrip_h + L.toolbar_h}px`, height: `${L.bookmarks_h}px` });
+    if (L.bookmarks_h <= 2) { bm.innerHTML = ""; bm.style.background = "#45434d"; }  // bookmarks bar hidden: just the divider
 
     const content = el("div", "content", root);
     content.style.top = `${L.tabstrip_h + L.toolbar_h + L.bookmarks_h}px`;
