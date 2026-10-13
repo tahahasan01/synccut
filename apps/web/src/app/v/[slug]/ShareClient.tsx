@@ -17,7 +17,15 @@ export default function ShareClient({ params }: { params: Promise<{ slug: string
   if (missing) return <main className="flex min-h-screen items-center justify-center text-muted">This video isn&apos;t available.</main>;
   if (!data) return <main className="min-h-screen bg-paper" />;
 
-  const { brand } = data;
+  // Only http(s) links reach href/src: a javascript: URL here would run on this page.
+  const web = (u: string | undefined) => (u && /^https?:\/\//i.test(u.trim()) ? u.trim() : "");
+  const brand = {
+    ...data.brand,
+    avatar_url: web(data.brand.avatar_url),
+    booking_url: web(data.brand.booking_url),
+    profile_url: web(data.brand.profile_url),
+    portfolio: data.brand.portfolio.map((i) => ({ ...i, url: web(i.url) })).filter((i) => i.url),
+  };
   const accent = brand.accent || "#4F46E5";
 
   return (
@@ -52,7 +60,7 @@ export default function ShareClient({ params }: { params: Promise<{ slug: string
               <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Recent work</h2>
               <div className="grid gap-3 sm:grid-cols-2">
                 {brand.portfolio.map((item) => (
-                  <a key={item.url} href={item.url} target="_blank" rel="noreferrer"
+                  <a key={item.url} href={item.url} target="_blank" rel="noopener noreferrer"
                     className="rounded-lg border border-rule bg-white p-4 text-sm font-medium text-ink hover:border-rule-strong hover:shadow-sm">
                     {item.title || item.url}
                   </a>
@@ -66,11 +74,12 @@ export default function ShareClient({ params }: { params: Promise<{ slug: string
           {brand.booking_url ? (
             <div className="overflow-hidden rounded-xl border border-rule bg-white">
               <div className="px-4 py-3 text-sm font-semibold" style={{ color: accent }}>{data.cta_label}</div>
-              <iframe src={brand.booking_url} title="Booking calendar" className="h-[620px] w-full border-0" />
+              <iframe src={brand.booking_url} title="Booking calendar" className="h-[620px] w-full border-0"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox" referrerPolicy="no-referrer" />
             </div>
           ) : null}
           {brand.profile_url && (
-            <a href={brand.profile_url} target="_blank" rel="noreferrer"
+            <a href={brand.profile_url} target="_blank" rel="noopener noreferrer"
               className="block rounded-lg px-4 py-3 text-center text-sm font-semibold text-white" style={{ background: accent }}>
               View my profile
             </a>

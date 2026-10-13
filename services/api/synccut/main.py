@@ -9,11 +9,12 @@ import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from . import media, pipeline
 from .claude_client import credential_kind
@@ -36,6 +37,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Files under /media come from users and from captured third-party sites. Serve them as
+# inert data: no MIME sniffing, and a sandboxed, script-free CSP if one is ever opened as
+# a document. (They still load normally as <img>/<video> in the web app.)
+MEDIA_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox",
+    "Cross-Origin-Resource-Policy": "cross-origin",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+@app.middleware("http")
+async def harden_media(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/media/"):
+        response.headers.update(MEDIA_HEADERS)
+    else:
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    return response
 app.mount("/media", StaticFiles(directory=store.projects_dir), name="media")
 app.mount("/stage", StaticFiles(directory=Path(__file__).parent / "stage"), name="stage")
 
@@ -652,6 +673,20 @@ class BrandIn(BaseModel):
     rating_text: str = Field("", max_length=120)
     portfolio: list[dict] = Field(default_factory=list, max_length=12)
 
+    @field_validator("avatar_url", "booking_url", "profile_url")
+    @classmethod
+    def _web_url(cls, value: str) -> str:
+        return web_url_or_error(value)
+
+
+def web_url_or_error(value: str) -> str:
+    """Links shown on share pages must be http(s): a javascript: or data: URL in an
+    href or iframe src would run script on the share page."""
+    value = (value or "").strip()
+    if value and urlparse(value).scheme.lower() not in ("http", "https"):
+        raise ValueError("Use a full web address starting with https://")
+    return value
+
 
 @app.get("/api/brand")
 def get_brand() -> dict:
@@ -660,9 +695,14 @@ def get_brand() -> dict:
 
 @app.put("/api/brand")
 def put_brand(body: BrandIn) -> dict:
-    portfolio = [
-        {"title": str(i.get("title", ""))[:80], "url": str(i.get("url", ""))[:500]}
-        for i in body.portfolio
-        if i.get("url")
-    ]
+    portfolio = []
+    for item in body.portfolio:
+        url = str(item.get("url", ""))[:500].strip()
+        if not url:
+            continue
+        try:
+            url = web_url_or_error(url)
+        except ValueError as exc:
+            raise HTTPException(422, f"Portfolio link “{url[:60]}”: {exc}")
+        portfolio.append({"title": str(item.get("title", ""))[:80], "url": url})
     return store.put_brand({**body.model_dump(), "portfolio": portfolio})

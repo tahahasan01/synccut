@@ -134,6 +134,7 @@ Put settings in a `.env` file at the repository root (it is git-ignored).
 | `SYNCCUT_API_BASE` | `http://127.0.0.1:8000` | How the API reaches itself when rendering the stage |
 | `SYNCCUT_RENDER_WORKERS` | auto (up to 4) | Parallel browser tabs used to draw frames |
 | `SYNCCUT_CHROMIUM` | newest Playwright Chromium found | Chrome/Chromium executable for capture and rendering |
+| `SYNCCUT_ALLOW_PRIVATE_URLS` | off | Lets page capture open local/private addresses. **Development only**; never enable on a public server. |
 | `NEXT_PUBLIC_API_URL` (web) | `http://localhost:8000` | Where the web app finds the API |
 
 **Which Claude credential?** For your own local use, either works. If you run SyncCut as a service for other people, use a Console API key: Claude subscription tokens are meant for your own use, not for products you offer to others.
@@ -162,6 +163,13 @@ The web app deploys to **Vercel** as a standard Next.js project:
 The **API cannot run on Vercel as-is.** It renders video with FFmpeg and Chromium in long-running jobs and keeps projects on local disk. Run it on a host with a persistent disk and a few CPU cores (a VM, or a container platform such as Railway, Fly.io or Render), with FFmpeg and Playwright's Chromium installed, and add your Vercel URL to `SYNCCUT_WEB_ORIGINS`. Moving storage to object storage and jobs to a queue, as in [docs/BUILD_PLAN.md](docs/BUILD_PLAN.md), is what it takes to make the API serverless.
 
 Share links (`/v/<slug>`) only work for clients once both the web app and the API are publicly reachable.
+
+## Security
+
+- **Page capture only opens public websites.** Every page, redirect, iframe, script and favicon request the capture browser makes is checked: loopback, private networks, link-local (cloud metadata), carrier-grade NAT, multicast and reserved addresses are refused, as are non-http(s) schemes and URLs with embedded credentials. Service workers are disabled in the capture browser so nothing bypasses this.
+- **Captured and uploaded files are inert.** Favicons are stored only as verified PNG/JPEG/GIF/WebP/ICO (never SVG), and everything under `/media` is served with `X-Content-Type-Options: nosniff` and a sandboxed, script-free Content-Security-Policy.
+- **Share-page links must be http(s).** Brand links (profile, booking, avatar, portfolio) are validated on the server and again on the page, so a `javascript:` URL can't run there. The booking calendar iframe is sandboxed.
+- **Secrets stay out of git.** `.env` is ignored; credentials are read from the environment only.
 
 ## Project structure
 

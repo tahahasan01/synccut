@@ -19,6 +19,24 @@ from typing import Callable
 from urllib.parse import quote_plus, urlparse
 
 from .core.actions import content_key
+from .netguard import BlockedURL, check_url, guard_context
+
+MAX_FAVICON_BYTES = 256 * 1024
+
+
+def raster_type(data: bytes) -> str | None:
+    """Identify PNG / JPEG / GIF / WebP / ICO by their file signature; anything else is refused."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    if data[:4] == b"\x00\x00\x01\x00":
+        return "ico"
+    return None
 from .core.scene import VIEW_H, VIEW_W
 
 MAX_PAGE_H = 7000
@@ -123,16 +141,24 @@ class Capturer:
             pass
 
     def _favicon(self, live, page_id: str) -> str | None:
+        """Save the site's icon, but only as a verified raster image.
+
+        The file is served from SyncCut's own origin, so an SVG (which can carry
+        script) or an HTML page mislabelled as an image must never be stored.
+        """
         try:
             href = live.evaluate("""() => { const l = document.querySelector('link[rel~="icon"], link[rel="shortcut icon"]');
                                        return l ? l.href : location.origin + '/favicon.ico'; }""")
-            res = live.context.request.get(href, timeout=3000)
-            ctype = res.headers.get("content-type", "")
-            if not res.ok or not ctype.startswith("image"):
+            check_url(href)  # this request bypasses the page's route guard, so check it here
+            res = live.context.request.get(href, timeout=3000, max_redirects=0)
+            if not res.ok:
                 return None
-            ext = {"image/svg+xml": "svg", "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"}.get(ctype.split(";")[0], "ico")
+            body = res.body()
+            ext = raster_type(body)
+            if ext is None or len(body) > MAX_FAVICON_BYTES:
+                return None
             path = self.out_dir / f"{page_id}.{ext}"
-            path.write_bytes(res.body())
+            path.write_bytes(body)
             return f"pages/{page_id}.{ext}"
         except Exception:
             return None
@@ -140,6 +166,13 @@ class Capturer:
     def load(self, tab: dict, url: str) -> dict:
         self.n += 1
         page_id = f"p{self.n}"
+        try:
+            check_url(url)
+        except BlockedURL as exc:
+            record = {"id": page_id, "url": url, "title": urlparse(url).netloc or url, "image": None, "height": VIEW_H,
+                      "status": "blocked", "error": str(exc), "favicon": None}
+            self.pages[page_id] = record
+            return record
         try:
             if tab["live"] is None:
                 tab["live"] = tab["ctx"].new_page()
@@ -189,7 +222,9 @@ def capture_actions(actions: list[dict], out_dir: Path, progress: Callable[[floa
 
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=chromium_executable(), headless=True)
-        ctx = browser.new_context(viewport={"width": VIEW_W, "height": VIEW_H}, device_scale_factor=1, locale="en-US")
+        ctx = browser.new_context(viewport={"width": VIEW_W, "height": VIEW_H}, device_scale_factor=1, locale="en-US",
+                                  service_workers="block")  # service workers would bypass the route guard
+        guard_context(ctx)  # every request the pages make (redirects, iframes, scripts) must be public too
         tabs = [{"ctx": ctx, "live": None, "history": ["start"], "scroll": 0.0}]
         active, previous = 0, 0
         try:
