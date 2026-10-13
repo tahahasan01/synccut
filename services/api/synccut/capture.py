@@ -14,6 +14,7 @@ import difflib
 import glob
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Callable
 from urllib.parse import quote_plus, urlparse
@@ -44,6 +45,18 @@ BLOCKED = re.compile(r"/sorry/|captcha|unusual traffic|just a moment|access deni
 CONSENT_TEXT = re.compile(r"^(accept all|accept|i agree|agree|allow all|got it|ok|accept cookies|alle akzeptieren)$", re.I)
 
 
+def title_from_url(url: str) -> str:
+    """A tab title for a page we only have a screenshot of: "CRM-Automation-Expert_~01ab" -> "CRM Automation Expert - Upwork"."""
+    p = urlparse(url)
+    site = p.netloc.removeprefix("www.").split(".")[0].capitalize()
+    segment = next((s for s in reversed(p.path.split("/")) if s), "")
+    segment = re.sub(r"[_~]+~?[0-9a-f]{6,}$", "", segment, flags=re.I)
+    words = re.sub(r"[-_+]+", " ", segment).strip()
+    if not words or words.isdigit() or re.fullmatch(r"~?[0-9a-f]{8,}", words, re.I):
+        return site or p.netloc
+    return f"{words[:1].upper()}{words[1:]} - {site}" if site else words
+
+
 def chromium_executable() -> str | None:
     explicit = os.environ.get("SYNCCUT_CHROMIUM")
     if explicit:
@@ -68,7 +81,7 @@ LINKS_JS = """() => [...document.querySelectorAll('a[href], button, [role=button
              href: el.href || '', x: r.x + scrollX, y: r.y + scrollY, w: r.width, h: r.height }; })
   .filter(l => l.w > 4 && l.h > 4 && l.text && l.y < %d).slice(0, 400)""" % MAX_PAGE_H
 
-CAPTURE_VERSION = 3
+CAPTURE_VERSION = 4  # 4: Chrome-style window, 1620x808 viewport
 
 # "scroll to the history section" means the section, not the first word "history" on the
 # page (often a nav link at the top): prefer headings, then matches below the first screen.
@@ -100,6 +113,7 @@ class Capturer:
         self.progress = progress
         self.pages: dict[str, dict] = {}
         self.n = 0
+        self.screenshots: dict[str, dict] = {}  # url -> {"path", "height"}: pages the user supplied
 
     # page loading ---------------------------------------------------------------
     def _snapshot(self, live, page_id: str) -> dict:
@@ -166,6 +180,18 @@ class Capturer:
     def load(self, tab: dict, url: str) -> dict:
         self.n += 1
         page_id = f"p{self.n}"
+        shot = self.screenshots.get(url)
+        if shot:
+            # Sites behind a login or bot check (an Upwork job post) come from the user's own
+            # screenshot; nothing is fetched. The live tab no longer matches what's shown.
+            shutil.copyfile(shot["path"], self.out_dir / f"{page_id}.jpg")
+            record = {"id": page_id, "url": url, "title": title_from_url(url), "image": f"pages/{page_id}.jpg",
+                      "height": int(min(max(shot["height"], VIEW_H), MAX_PAGE_H)), "status": "ok", "favicon": None,
+                      "static": True, "links": []}
+            tab["live_stale"] = True
+            self.pages[page_id] = record
+            return record
+        tab["live_stale"] = False
         try:
             check_url(url)
         except BlockedURL as exc:
@@ -213,11 +239,13 @@ def _result_link(live, ordinal: int) -> dict | None:
     return None
 
 
-def capture_actions(actions: list[dict], out_dir: Path, progress: Callable[[float, str], None]) -> dict:
+def capture_actions(actions: list[dict], out_dir: Path, progress: Callable[[float, str], None],
+                    screenshots: dict[str, dict] | None = None) -> dict:
     from playwright.sync_api import sync_playwright
 
     out_dir.mkdir(parents=True, exist_ok=True)
     cap = Capturer(out_dir, progress)
+    cap.screenshots = screenshots or {}
     results: dict[str, dict] = {}
 
     # All capture traffic leaves through the egress proxy, which resolves each host once,
@@ -250,7 +278,7 @@ def capture_actions(actions: list[dict], out_dir: Path, progress: Callable[[floa
                             break
                     r["page"] = record["id"]
                 elif kind == "click":
-                    if not current or current["status"] != "ok" or tab["live"] is None:
+                    if not current or current["status"] != "ok" or tab["live"] is None or tab.get("live_stale"):
                         r["flags"].append("target_not_found")
                     else:
                         m = re.match(r"(first|second|third) result", action["target"].lower())
@@ -277,7 +305,7 @@ def capture_actions(actions: list[dict], out_dir: Path, progress: Callable[[floa
                         y = height
                     elif target == "top":
                         y = 0
-                    elif current and current["status"] == "ok" and tab["live"] is not None:
+                    elif current and current["status"] == "ok" and tab["live"] is not None and not tab.get("live_stale"):
                         found = tab["live"].evaluate(FIND_TEXT_JS, [target, VIEW_H])
                         if found is None:
                             r["flags"].append("scroll_text_not_found")
@@ -324,14 +352,20 @@ def capture_actions(actions: list[dict], out_dir: Path, progress: Callable[[floa
         page.pop("links", None)
     progress(1.0, "Pages captured")
     return {"pages": cap.pages, "results": results, "order": [a["id"] for a in actions], "viewport": [VIEW_W, VIEW_H],
-            "version": CAPTURE_VERSION}
+            "version": CAPTURE_VERSION, "screenshots": screenshots_key(cap.screenshots)}
 
 
-def capture_is_current(capture: dict | None, actions: list[dict]) -> bool:
+def screenshots_key(screenshots: dict[str, dict] | None) -> list:
+    return sorted([url, s.get("uploaded_at")] for url, s in (screenshots or {}).items())
+
+
+def capture_is_current(capture: dict | None, actions: list[dict], screenshots: dict[str, dict] | None = None) -> bool:
     """A capture stays valid while every action's content is unchanged; timing edits don't matter."""
     if not capture or capture.get("order") != [a["id"] for a in actions]:
         return False  # capture runs the plan in order, so a reorder needs a fresh run
     if capture.get("viewport") != [VIEW_W, VIEW_H] or capture.get("version") != CAPTURE_VERSION:
         return False  # the browser window layout changed; pages must match its viewport
+    if (capture.get("screenshots") or []) != screenshots_key(screenshots):
+        return False  # a page screenshot was added, replaced or removed
     results = capture.get("results", {})
     return all(a["id"] in results and results[a["id"]].get("key") == list(content_key(a)) for a in actions) and len(results) == len(actions)

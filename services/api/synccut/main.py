@@ -294,9 +294,58 @@ def set_page(pid: str, body: PageIn) -> dict:
     project = _project(pid)
     if project.get("page_url", "") == body.url:
         return project
-    updated = _update(pid, lambda p: p.update(page_url=body.url))
+    updated = _update(pid, lambda p: p.update(page_url=body.url, page_shot=None))  # a screenshot belongs to its link
     if updated.get("transcript") and updated.get("mode") == "generate" and not _busy(updated, "prepare"):
         _start_prepare(pid, replan=True)
+        updated = _project(pid)
+    return updated
+
+
+MAX_SHOT_BYTES = 25 * 1024 * 1024
+
+
+@app.post("/api/projects/{pid}/page/screenshot")
+async def upload_page_screenshot(pid: str, file: UploadFile = File(...)) -> dict:
+    """A screenshot of the linked page, for sites that can't be captured (login walls, bot checks).
+    Only verified PNG/JPEG/WebP images are accepted; the stored copy is re-encoded as JPEG."""
+    from .capture import raster_type
+    from .core.scene import VIEW_W
+
+    project = _project(pid)
+    if not project.get("page_url"):
+        raise HTTPException(400, "Save the page link first.")
+    body = await file.read(MAX_SHOT_BYTES + 1)
+    if len(body) > MAX_SHOT_BYTES:
+        raise HTTPException(413, "That screenshot is over 25 MB.")
+    if raster_type(body) not in ("png", "jpg", "webp"):
+        raise HTTPException(422, "Use a PNG, JPEG or WebP screenshot.")
+    pdir = store.project_dir(pid) / "page"
+    pdir.mkdir(parents=True, exist_ok=True)
+    original = pdir / "upload.bin"
+    original.write_bytes(body)
+    out = pdir / "shot.jpg"
+    try:
+        # Scale to the browser's page width so it looks like the page rendered in that window.
+        media.ffmpeg("-i", str(original), "-frames:v", "1", "-vf", f"scale={VIEW_W}:-2:flags=lanczos", "-q:v", "2", str(out), timeout=60)
+        info = media.probe(out)
+    except Exception:
+        raise HTTPException(422, "Couldn't read that image.")
+    finally:
+        original.unlink(missing_ok=True)
+    shot = {"path": "page/shot.jpg", "height": info["height"], "uploaded_at": time.time()}
+    updated = _update(pid, lambda p: p.update(page_shot=shot))
+    if updated.get("transcript") and updated.get("mode") == "generate" and not _busy(updated, "prepare"):
+        _start_prepare(pid, replan=False)
+        updated = _project(pid)
+    return updated
+
+
+@app.delete("/api/projects/{pid}/page/screenshot")
+def delete_page_screenshot(pid: str) -> dict:
+    (store.project_dir(pid) / "page" / "shot.jpg").unlink(missing_ok=True)
+    updated = _update(pid, lambda p: p.update(page_shot=None))
+    if updated.get("transcript") and updated.get("mode") == "generate" and not _busy(updated, "prepare"):
+        _start_prepare(pid, replan=False)
         updated = _project(pid)
     return updated
 
@@ -582,6 +631,7 @@ class LayoutPatch(BaseModel):
     pip_corner: Literal["top-left", "top-right", "bottom-left", "bottom-right"] | None = None
     pip_width_pct: float | None = Field(None, ge=0.1, le=0.45)
     pip_visible: bool | None = None
+    pip_shape: Literal["circle", "rect"] | None = None
     camera_zoom: bool | None = None
 
 

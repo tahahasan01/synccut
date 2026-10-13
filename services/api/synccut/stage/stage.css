@@ -1,121 +1,147 @@
-/* Generated browser stage: a macOS-style desktop (menu bar, dock, wallpaper) with a
-   Safari-style window. Generic on purpose: no Apple logo, no real app icons.
+/* Generated browser stage: a MacBook screen (menu bar, wallpaper, Dock) with a
+   Chrome-style window in dark mode. App icons are generic glyphs: no real logos.
    Authored at 1920×1080 (the output size). Motion is driven entirely by stage.js
    seek(t): no CSS transitions or animations, so every frame is a pure function of time. */
 
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1020; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #050b14; }
 
 #fit { position: absolute; inset: 0; overflow: hidden; }
 #stage {
   position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: hidden;
-  transform-origin: 0 0;
+  transform-origin: 0 0; background: #0b1a2b;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI Variable", "Segoe UI", Inter, Roboto, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  user-select: none;
-  /* Sequoia-like wallpaper: deep blue → violet waves with warm highlights */
-  background:
-    radial-gradient(1400px 700px at 80% 115%, rgba(255, 140, 90, 0.75) 0%, rgba(255, 140, 90, 0) 60%),
-    radial-gradient(1200px 800px at 8% 100%, rgba(236, 72, 153, 0.55) 0%, rgba(236, 72, 153, 0) 60%),
-    radial-gradient(1500px 900px at 30% 10%, rgba(56, 189, 248, 0.55) 0%, rgba(56, 189, 248, 0) 60%),
-    radial-gradient(1100px 1100px at 95% 0%, rgba(129, 140, 248, 0.8) 0%, rgba(129, 140, 248, 0) 60%),
-    linear-gradient(160deg, #0f1e5a 0%, #2a2a8f 40%, #5b2a9c 75%, #8a2f7a 100%);
+  -webkit-font-smoothing: antialiased; user-select: none;
 }
-
 #camera { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
+.wallpaper { position: absolute; inset: 0; width: 1920px; height: 1080px; display: block; }
 
 /* ── Menu bar ───────────────────────────────────────────────────────────── */
 .menubar {
   position: absolute; left: 0; top: 0; right: 0; display: flex; align-items: center; justify-content: space-between;
-  padding: 0 18px; color: #fff; font-size: 14px; letter-spacing: 0.1px;
-  background: rgba(20, 18, 50, 0.28); box-shadow: inset 0 -0.5px 0 rgba(255, 255, 255, 0.12);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  padding: 0 16px 0 20px; color: #fff; font-size: 13.5px; letter-spacing: 0.05px;
+  background: rgba(9, 17, 30, 0.58);
 }
-.menubar .menus { display: flex; gap: 22px; align-items: center; }
+.menubar .menus { display: flex; gap: 19px; align-items: center; }
 .menubar .menus b { font-weight: 700; }
-.menubar .status { display: flex; gap: 16px; align-items: center; font-weight: 500; }
-.menubar svg { width: 18px; height: 16px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; }
+.menubar .menus span { font-weight: 500; opacity: 0.96; }
+.menubar .status { display: flex; gap: 17px; align-items: center; font-weight: 500; }
+.menubar svg { width: 17px; height: 15px; fill: none; stroke: #fff; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .menubar svg .fill { fill: #fff; stroke: none; }
+.menubar .clock { min-width: 150px; text-align: right; }
 
 /* ── Dock ───────────────────────────────────────────────────────────────── */
 .dock {
-  position: absolute; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 0 12px;
-  border-radius: 20px; background: rgba(255, 255, 255, 0.22);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35), 0 10px 30px rgba(10, 10, 40, 0.35);
+  position: absolute; display: flex; align-items: center; gap: 7px; padding: 0 9px;
+  border-radius: 22px; background: rgba(48, 58, 74, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 12px 34px rgba(0, 0, 0, 0.35);
 }
-.dock i { position: relative; width: 50px; height: 50px; border-radius: 12px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.35); }
-.dock i.running::after { content: ""; position: absolute; left: 50%; bottom: -7px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: rgba(255, 255, 255, 0.9); }
+.dock .app { position: relative; flex: none; }
+.dock .app svg { display: block; width: 100%; height: 100%; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35)); }
+.dock .app.running::after {
+  content: ""; position: absolute; left: 50%; bottom: -7px; width: 4px; height: 4px; margin-left: -2px;
+  border-radius: 50%; background: rgba(255, 255, 255, 0.82);
+}
+.dock .sep { width: 1px; align-self: stretch; margin: 12px 4px; background: rgba(255, 255, 255, 0.25); }
+.dock .badge {
+  position: absolute; right: -3px; top: -3px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px;
+  background: #ff3b30; color: #fff; font: 600 12px/20px -apple-system, "Segoe UI", sans-serif; text-align: center;
+}
 
-/* ── Window ─────────────────────────────────────────────────────────────── */
+/* ── Chrome window (dark) ───────────────────────────────────────────────── */
 .window {
-  position: absolute; border-radius: 12px; overflow: hidden; background: #fff;
-  box-shadow: 0 45px 100px rgba(5, 8, 30, 0.55), 0 0 0 0.5px rgba(0, 0, 0, 0.45), inset 0 0 0 0.5px rgba(255, 255, 255, 0.3);
+  position: absolute; border-radius: 11px; overflow: hidden; background: #2b2a33;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.07);
 }
-.toolbar {
-  position: absolute; left: 0; right: 0; top: 0;
-  background: linear-gradient(#f6f6f7, #efeff1);
-}
-.lights { position: absolute; left: 20px; top: 50%; display: flex; gap: 8px; transform: translateY(-50%); }
-.lights i { width: 13px; height: 13px; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.22); }
+.tabstrip { position: absolute; left: 0; right: 0; top: 0; background: #1f1e25; }
+.lights { position: absolute; left: 18px; top: 50%; display: flex; gap: 8px; transform: translateY(-50%); }
+.lights i { width: 12.5px; height: 12.5px; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.35); }
 .lights i:nth-child(1) { background: #ff5f57; }
 .lights i:nth-child(2) { background: #febc2e; }
 .lights i:nth-child(3) { background: #28c840; }
-.nav { position: absolute; left: 84px; top: 50%; display: flex; gap: 10px; transform: translateY(-50%); }
-.nav svg { width: 28px; height: 28px; stroke: #5f5f64; stroke-width: 1.9; fill: none; stroke-linecap: round; stroke-linejoin: round; padding: 4px; }
-.nav svg.dim { stroke: #b8b8bd; }
+.tabsearch { position: absolute; left: 84px; top: 50%; width: 26px; height: 26px; margin-top: -13px; border-radius: 7px; background: #33323b; }
+.tabsearch svg, .plus svg { width: 100%; height: 100%; stroke: #c8c6d0; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.plus { position: absolute; width: 28px; height: 28px; padding: 6px; border-radius: 50%; }
 
-.address {
-  position: absolute; display: flex; align-items: center; justify-content: center; padding: 0 16px; overflow: hidden;
-  background: #e4e4e8; border-radius: 9px; color: #1d1d1f; font-size: 15px; white-space: nowrap;
-}
-.address .text { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
-.address.typing { justify-content: flex-start; }
-.address.focus { background: #fff; box-shadow: 0 0 0 3.5px rgba(10, 132, 255, 0.32), 0 0 0 1px #0a84ff; }
-.address .lock { width: 13px; height: 13px; flex: none; stroke: #6e6e73; stroke-width: 2.4; fill: none; }
-.address .placeholder { color: #8e8e93; }
-.address .caret { display: inline-block; width: 1.5px; height: 18px; margin-left: 1px; background: #0a84ff; vertical-align: -4px; }
-.loading { position: absolute; left: 0; bottom: 0; height: 2.5px; width: 0; background: #0a84ff; opacity: 0; }
-.tools { position: absolute; right: 20px; top: 50%; display: flex; gap: 18px; transform: translateY(-50%); }
-.tools svg { width: 21px; height: 21px; stroke: #5f5f64; stroke-width: 1.9; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-
-.tabbar {
-  position: absolute; left: 0; right: 0;
-  background: #e9e9ec; border-top: 1px solid #dcdce0; border-bottom: 1px solid #d4d4d8;
-}
 .tab {
-  position: absolute; display: none; align-items: center; gap: 9px; padding: 0 12px 0 14px;
-  border-radius: 8px; color: #4a4a4f; font-size: 13px; white-space: nowrap;
+  position: absolute; display: none; align-items: center; gap: 9px; padding: 0 10px 0 13px;
+  color: #c9c7d1; font-size: 12.5px; white-space: nowrap; border-radius: 9px 9px 0 0;
 }
 .tab.open { display: flex; }
-.tab.active { background: #fff; color: #1d1d1f; box-shadow: 0 0.5px 2px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.08); }
+.tab.active { background: #3a3943; color: #f1f0f5; }
+.tab:not(.active).open::before { content: ""; position: absolute; right: -2px; top: 9px; bottom: 9px; width: 1px; background: #4a4953; }
 .tab .fav { width: 16px; height: 16px; flex: none; border-radius: 3px; object-fit: contain; }
-.tab .fav.globe { background: center/14px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18'/%3E%3C/svg%3E"); }
+.tab .fav.globe { background: center/15px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23b9b7c2' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18'/%3E%3C/svg%3E"); }
+.tab .spin { width: 16px; height: 16px; flex: none; }
+.tab .spin circle { fill: none; stroke: #a8c7fa; stroke-width: 2.4; stroke-linecap: round; stroke-dasharray: 28 60; }
 .tab .title { overflow: hidden; text-overflow: ellipsis; flex: 1; }
-.tab .x { color: #8e8e93; font-size: 15px; }
+.tab .x { width: 16px; height: 16px; flex: none; stroke: #b9b7c2; stroke-width: 2; fill: none; stroke-linecap: round; }
+
+.toolbar { position: absolute; left: 0; right: 0; background: #3a3943; }
+.nav { position: absolute; left: 10px; top: 50%; display: flex; gap: 4px; transform: translateY(-50%); }
+.nav svg { width: 32px; height: 32px; padding: 7px; stroke: #e3e1ea; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.nav svg.dim { stroke: #75737d; }
+
+.omnibox {
+  position: absolute; display: flex; align-items: center; gap: 10px; padding: 0 14px; overflow: visible;
+  background: #2a2930; border-radius: 17px; color: #ecebf1; font-size: 14.5px; white-space: nowrap;
+}
+.omnibox .lead { width: 16px; height: 16px; flex: none; stroke: #c4c2cc; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.omnibox .text { display: flex; align-items: center; min-width: 0; overflow: hidden; flex: 1; }
+.omnibox .host { color: #f3f2f7; }
+.omnibox .rest { color: #9f9da8; }
+.omnibox .placeholder { color: #9f9da8; }
+.omnibox .caret { display: inline-block; width: 1.5px; height: 18px; margin-left: 1px; background: #e8e6ef; }
+.omnibox .star { width: 18px; height: 18px; flex: none; stroke: #c4c2cc; stroke-width: 1.8; fill: none; stroke-linejoin: round; }
+.omnibox.focus { background: #23222a; box-shadow: inset 0 0 0 2px #b7a8f0; }
+.omnibox.open { border-radius: 17px 17px 0 0; box-shadow: none; background: #2f2e37; }
+.suggest {
+  position: absolute; left: 0; right: 0; top: 100%; padding: 4px 0 10px; display: none;
+  background: #2f2e37; border-radius: 0 0 17px 17px; box-shadow: 0 14px 30px rgba(0, 0, 0, 0.45); z-index: 3;
+}
+.omnibox.open .suggest { display: block; }
+.suggest .row { display: flex; align-items: center; gap: 14px; height: 38px; padding: 0 16px; color: #ecebf1; font-size: 14px; }
+.suggest .row.sel { background: #44434d; }
+.suggest .row svg { width: 16px; height: 16px; flex: none; stroke: #c4c2cc; stroke-width: 2; fill: none; stroke-linecap: round; }
+.suggest .row .muted { color: #9f9da8; }
+
+.tools { position: absolute; right: 12px; top: 50%; display: flex; gap: 12px; align-items: center; transform: translateY(-50%); }
+.tools .ext { width: 18px; height: 18px; border-radius: 4px; }
+.tools svg { width: 20px; height: 20px; stroke: #d6d4de; stroke-width: 1.9; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.tools .avatar { width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(140deg, #c79a7b, #6b4b3a); box-shadow: 0 0 0 1.5px #3a3943, 0 0 0 2.5px #8a8894; }
+
+.bookmarks { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 4px; padding: 0 12px; background: #3a3943; color: #dedce6; font-size: 12.5px; }
+.bookmarks .bm { display: flex; align-items: center; gap: 7px; padding: 4px 9px; white-space: nowrap; }
+.bookmarks .bm i { width: 14px; height: 14px; border-radius: 3px; flex: none; }
+.bookmarks svg { width: 15px; height: 15px; stroke: #c4c2cc; stroke-width: 1.8; fill: none; stroke-linejoin: round; flex: none; }
+.bookmarks .right { margin-left: auto; }
 
 .content { position: absolute; left: 0; right: 0; bottom: 0; overflow: hidden; background: #fff; }
 .page { position: absolute; inset: 0; display: none; overflow: hidden; }
 .page.show { display: block; }
 .page img { position: absolute; left: 0; top: 0; width: 100%; display: block; }
 
-.start { background: linear-gradient(#f5f5f7, #ececf0); display: none; }
-.start.show { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 26px; }
-.start .hello { font-size: 34px; font-weight: 700; color: #3a3a3c; letter-spacing: -0.5px; }
-.start .box { width: 640px; height: 52px; border-radius: 14px; background: #fff; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.07), 0 0 0 1px #e3e3e8;
-  display: flex; align-items: center; padding: 0 22px; color: #8e8e93; font-size: 17px; }
+/* Chrome's dark New Tab page, without the search engine's logo */
+.start { background: #35343d; display: none; }
+.start.show { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 46px; padding-bottom: 60px; }
+.start .box {
+  width: 744px; height: 54px; border-radius: 27px; background: #fff; display: flex; align-items: center; gap: 14px;
+  padding: 0 22px; color: #6f6d78; font-size: 16.5px;
+}
+.start .box svg { width: 20px; height: 20px; stroke: #6f6d78; stroke-width: 2; fill: none; stroke-linecap: round; }
+.start .tiles { display: flex; gap: 22px; }
+.start .tile { width: 90px; display: flex; flex-direction: column; align-items: center; gap: 12px; color: #e9e7ef; font-size: 13px; }
+.start .tile i { width: 48px; height: 48px; border-radius: 50%; background: #4a4953; display: flex; align-items: center; justify-content: center;
+  font-style: normal; font-weight: 700; font-size: 17px; color: #fff; }
 
-.placeholder-page { background: #f5f5f7; display: none; }
+/* A page that couldn't be captured: Chrome's own "can't reach" look, not a SyncCut card */
+.placeholder-page { background: #35343d; display: none; color: #e9e7ef; }
 .placeholder-page.show { display: flex; align-items: center; justify-content: center; }
-.placeholder-page .card { text-align: center; color: #3a3a3c; }
-.placeholder-page .card b { display: block; font-size: 30px; margin: 18px 0 8px; color: #1d1d1f; }
-.placeholder-page .card span { font-size: 17px; color: #6e6e73; }
+.placeholder-page .card { width: 560px; }
+.placeholder-page .card b { display: block; font-size: 26px; font-weight: 500; margin: 26px 0 12px; }
+.placeholder-page .card span { font-size: 15px; color: #b9b7c2; }
 
-/* ── Cursor (outside the camera, so zoom never scales it) ───────────────── */
-#cursor { position: absolute; left: 0; top: 0; width: 30px; height: 30px; pointer-events: none; z-index: 10; opacity: 0; }
-#cursor svg { position: absolute; inset: 0; width: 100%; height: 100%; fill: #fff; stroke: rgba(9, 13, 25, 0.92);
-  stroke-width: 1.5; stroke-linejoin: round; paint-order: stroke fill; filter: drop-shadow(0 2px 5px rgba(8, 12, 24, 0.45));
-  transform-origin: 24% 10%; }
-#cursor .flash, #cursor .ring { position: absolute; left: 7px; top: 3px; width: 40px; height: 40px; margin: -20px 0 0 -20px; border-radius: 50%; opacity: 0; }
-/* Ripple drawn dark: most captured pages are light, and a white ripple on white reads as no click at all. */
-#cursor .flash { background: rgba(15, 23, 42, 0.32); }
-#cursor .ring { border: 2.5px solid rgba(15, 23, 42, 0.38); }
+/* ── Pointer: the macOS arrow (outside the camera, so zoom never scales it) ── */
+#cursor { position: absolute; left: 0; top: 0; width: 26px; height: 26px; pointer-events: none; z-index: 10; opacity: 0; }
+#cursor svg { position: absolute; inset: 0; width: 100%; height: 100%; fill: #000; stroke: #fff;
+  stroke-width: 1.6; stroke-linejoin: round; paint-order: stroke fill; filter: drop-shadow(0 1.5px 2px rgba(0, 0, 0, 0.45)); }

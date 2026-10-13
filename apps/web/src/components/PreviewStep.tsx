@@ -65,6 +65,7 @@ export function PreviewStep({ project, onChange }: { project: Project; onChange:
     );
   }
 
+  const circle = (layout.pip_shape ?? "circle") === "circle";
   const pos: Record<Corner, string> = {
     "top-left": "left-[1.7%] top-[3%]", "top-right": "right-[1.7%] top-[3%]",
     "bottom-left": "left-[1.7%] bottom-[3%]", "bottom-right": "right-[1.7%] bottom-[3%]",
@@ -101,8 +102,8 @@ export function PreviewStep({ project, onChange }: { project: Project; onChange:
               playsInline
               onPlay={() => setPlaying(true)}
               onPause={() => setPlaying(false)}
-              className={`absolute aspect-video rounded-[8px] object-cover shadow-lg ${pos[layout.pip_corner]} ${layout.pip_visible ? "" : "opacity-0"}`}
-              style={{ width: `${width * 100}%` }}
+              className={`absolute object-cover shadow-lg ${circle ? "aspect-square rounded-full" : "aspect-video rounded-[8px]"} ${pos[layout.pip_corner]} ${layout.pip_visible ? "" : "opacity-0"}`}
+              style={{ width: `${width * (circle ? 65 : 100)}%` }}
             />
             {!ready && <div className="absolute inset-0 flex items-center justify-center text-sm text-white/70">Loading the preview…</div>}
           </div>
@@ -154,6 +155,14 @@ export function PreviewStep({ project, onChange }: { project: Project; onChange:
               Show my video (picture-in-picture)
             </label>
             <div className="grid grid-cols-2 gap-2">
+              {(["circle", "rect"] as const).map((shape) => (
+                <button key={shape} onClick={() => patch({ pip_shape: shape })}
+                  className={`rounded-md border px-2 py-1.5 text-xs ${(layout.pip_shape ?? "circle") === shape ? "border-ink bg-cue-soft text-ink" : "border-rule text-muted"}`}>
+                  {shape === "circle" ? "Round avatar" : "Rectangle"}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
               {CORNERS.map((c) => (
                 <button key={c} onClick={() => patch({ pip_corner: c })}
                   className={`rounded-md border px-2 py-1.5 text-xs capitalize ${layout.pip_corner === c ? "border-ink bg-cue-soft text-ink" : "border-rule text-muted"}`}>
@@ -168,8 +177,8 @@ export function PreviewStep({ project, onChange }: { project: Project; onChange:
                 onPointerUp={() => patch({ pip_width_pct: width })} onKeyUp={() => patch({ pip_width_pct: width })} />
             </label>
             <label className="flex items-start gap-2 text-sm text-ink">
-              <input type="checkbox" className="mt-1" checked={layout.camera_zoom !== false} onChange={(e) => patch({ camera_zoom: e.target.checked })} />
-              <span>Zoom in on each action<span className="block text-xs text-muted">The view pushes in on the address bar or link being used, then pulls back to the whole window.</span></span>
+              <input type="checkbox" className="mt-1" checked={layout.camera_zoom === true} onChange={(e) => patch({ camera_zoom: e.target.checked })} />
+              <span>Zoom in on each action<span className="block text-xs text-muted">Pushes in on the address bar or link being used. Leave it off for a plain screen recording.</span></span>
             </label>
             <p className="text-xs text-muted">Timing is set on the Browser actions tab. The export uses your original audio.</p>
         </div>

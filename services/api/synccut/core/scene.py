@@ -3,48 +3,54 @@
 Pure and deterministic. The stage (``synccut/stage/stage.js``) only interpolates
 these tracks, so preview and render show exactly the same thing at time t.
 
-Motion rules follow the interactive-product-demo skill: the click lands before
-the state it causes, the cursor is continuous (never teleports), travel ~850 ms,
-press ~190 ms, and the camera opens and closes on the whole window.
+It should read as a real screen recording: the pointer is always visible and
+continuous (never teleports), the click lands before the state it causes, and
+each result (page, tab, scroll) appears right as the narration says it, because
+the travel, typing and loading are scheduled before the trigger word. The
+optional camera push-in is off by default.
 """
 
 from __future__ import annotations
 
 from urllib.parse import urlparse
 
-# macOS desktop: menu bar on top, dock at the bottom, and a Safari-style window with
-# one unified toolbar (window controls, sidebar, back/forward, centred address field,
-# share / new tab / tab overview) and the tab strip underneath.
+# A MacBook screen: macOS menu bar, the Dock, and a Chrome-style window in dark mode:
+# tab strip (window controls, tab search, tabs, +), toolbar (back/forward/reload,
+# omnibox, extensions, profile) and a bookmarks bar above the page.
 STAGE_W, STAGE_H = 1920, 1080
-MENUBAR_H = 30
-WINDOW = {"x": 150, "y": 52, "w": 1620, "h": 950}
-TOOLBAR_H, TABBAR_H = 52, 38
-CONTENT = {"x": WINDOW["x"], "y": WINDOW["y"] + TOOLBAR_H + TABBAR_H, "w": WINDOW["w"], "h": WINDOW["h"] - TOOLBAR_H - TABBAR_H}
+MENUBAR_H = 26
+WINDOW = {"x": 150, "y": 48, "w": 1620, "h": 924}
+TABSTRIP_H, TOOLBAR_H, BOOKMARKS_H = 42, 44, 30
+CHROME_H = TABSTRIP_H + TOOLBAR_H + BOOKMARKS_H
+CONTENT = {"x": WINDOW["x"], "y": WINDOW["y"] + CHROME_H, "w": WINDOW["w"], "h": WINDOW["h"] - CHROME_H}
 VIEW_W, VIEW_H = CONTENT["w"], CONTENT["h"]  # captured pages are rendered at exactly this size
-ADDRESS = {"x": WINDOW["x"] + (WINDOW["w"] - 760) // 2, "y": WINDOW["y"] + 8, "w": 760, "h": 36}
-TABS_X, TAB_W, TAB_Y, TAB_H = WINDOW["x"] + 8, 260, WINDOW["y"] + TOOLBAR_H + 3, 32
-TOOL_Y = WINDOW["y"] + TOOLBAR_H // 2
-BACK_BTN = (WINDOW["x"] + 140, TOOL_Y)
-PLUS_BTN = (WINDOW["x"] + WINDOW["w"] - 88, TOOL_Y)
-DOCK = {"w": 560, "h": 62, "y": STAGE_H - 62 - 10}
+ADDRESS = {"x": WINDOW["x"] + 122, "y": WINDOW["y"] + TABSTRIP_H + 5, "w": WINDOW["w"] - 122 - 360, "h": 34}
+TABS_X, TAB_W, TAB_Y, TAB_H = WINDOW["x"] + 122, 236, WINDOW["y"] + 6, 36
+TOOL_Y = WINDOW["y"] + TABSTRIP_H + TOOLBAR_H // 2
+BACK_BTN = (WINDOW["x"] + 24, TOOL_Y)
+DOCK = {"icon": 62, "h": 76, "y": STAGE_H - 76 - 5}
 
 LAYOUT = {
     "stage": {"w": STAGE_W, "h": STAGE_H},
     "menubar_h": MENUBAR_H,
     "window": WINDOW,
-    "tabbar_h": TABBAR_H,
+    "tabstrip_h": TABSTRIP_H,
     "toolbar_h": TOOLBAR_H,
+    "bookmarks_h": BOOKMARKS_H,
     "content": CONTENT,
     "address": ADDRESS,
     "tabs": {"x": TABS_X, "y": TAB_Y, "w": TAB_W, "h": TAB_H},
     "back": {"x": BACK_BTN[0], "y": BACK_BTN[1]},
-    "plus": {"x": PLUS_BTN[0], "y": PLUS_BTN[1]},
     "dock": DOCK,
 }
 
-TRAVEL = 850
-PRESS = 190
-LOAD = 650
+# Timing: the visible result of an action lands just after the word that triggers it,
+# so the work (pointer travel, typing, loading) is scheduled *before* the word.
+TRAVEL = 620     # pointer travel
+PRESS = 90       # click
+LOAD = 420       # navigation: the old page stays until the new one paints
+LAND = 220       # result appears this long after the word starts
+TYPE_PER_CHAR, TYPE_MIN, TYPE_MAX = 38, 280, 950
 CAMERA_ZOOM = 1.12
 LATE_FLAG_MS = 1500
 
@@ -81,7 +87,7 @@ def _tab_point(index: int) -> tuple[float, float]:
 
 
 def _plus_point(n_tabs: int) -> tuple[float, float]:
-    return PLUS_BTN  # Safari-style: "new tab" lives in the toolbar, not after the last tab
+    return TABS_X + n_tabs * (TAB_W + 4) + 18, TAB_Y + TAB_H / 2  # Chrome: just after the last tab
 
 
 def build_scene(
@@ -89,8 +95,9 @@ def build_scene(
     capture: dict,
     duration_ms: float,
     *,
-    camera: bool = True,
+    camera: bool = False,
     fps: int = 30,
+    clock_ms: float = 0,
 ) -> dict:
     pages = {"start": {"id": "start", "url": "", "title": "New Tab", "image": None, "height": VIEW_H, "status": "start", "favicon": None}}
     for pid, page in capture.get("pages", {}).items():
@@ -130,28 +137,49 @@ def build_scene(
     def page_height(page_id: str) -> float:
         return float(pages.get(page_id, {}).get("height") or VIEW_H)
 
-    first_cursor = None
+    omnibox_focused = None  # tab id whose omnibox already has focus (a new tab's does)
+
+    def lead(ideal: float) -> tuple[float, float]:
+        """Start no earlier than the previous action allows; return (start, how late)."""
+        begin = max(ideal, t_free, 0.0)
+        return begin, begin - max(ideal, 0.0)  # work that "would have" started before 0:00 isn't late
+
     for action in actions:
         r = results.get(action["id"], {})
         flags = list(r.get("flags", []))
-        start = max(action["at_ms"], t_free)
+        at = action["at_ms"]
         tab = tabs[active]
         kind = action["type"]
-        end = start
+        end = at
+        shift = 0.0
 
-        if kind in ("navigate", "search"):
-            point = (ADDRESS["x"] + 90, ADDRESS["y"] + ADDRESS["h"] / 2)
-            travel_from = max(t_free, start - TRAVEL)
-            shot(travel_from, CAMERA_ZOOM, (ADDRESS["x"] + ADDRESS["w"] / 2, ADDRESS["y"] + 170))
-            click = move(travel_from, point)
-            first_cursor = first_cursor if first_cursor is not None else travel_from
-            tracks["presses"].append({"t": click, "x": point[0], "y": point[1]})
+        if kind == "navigate" and at <= 400 and not tracks["moves"] and r.get("page") and len(tabs) == 1 and tab["page"] == "start":
+            # The recording opens on this page (e.g. the job post being replied to): already loaded.
+            tracks["tab_page"][0] = {"t": 0, "tab": tab["id"], "page": r["page"]}
+            tab.update(page=r["page"], scroll=0.0, history=[r["page"]])
+            end = 0.0
+
+        elif kind in ("navigate", "search"):
             text = typed_text(action)
-            t0 = click + 120
-            t1 = t0 + min(max(len(text) * 55, 350), 1500)
-            enter = t1 + 150
+            typing_ms = min(max(len(text) * TYPE_PER_CHAR, TYPE_MIN), TYPE_MAX)
+            skip_click = omnibox_focused == tab["id"]
+            # Back-schedule from the moment the page should appear.
+            enter_ideal = at + LAND - LOAD
+            click_ideal = enter_ideal - 110 - typing_ms - (0 if skip_click else 90)
+            begin, shift = lead(click_ideal - (0 if skip_click else TRAVEL))
+            point = (ADDRESS["x"] + ADDRESS["w"] * 0.55, ADDRESS["y"] + ADDRESS["h"] / 2)  # clear of the typed text
+            if skip_click:
+                click = begin
+            else:
+                shot(begin, CAMERA_ZOOM, (ADDRESS["x"] + ADDRESS["w"] / 2, ADDRESS["y"] + 170))
+                click = max(move(begin, point), click_ideal)  # no travel needed: still wait for the moment
+                tracks["presses"].append({"t": click, "x": point[0], "y": point[1]})
+            t0 = click + (0 if skip_click else 90)
+            t1 = t0 + typing_ms
+            enter = t1 + 110
             loaded = enter + LOAD
-            tracks["typing"].append({"t0": t0, "t1": t1, "enter": enter, "until": loaded, "tab": tab["id"], "text": text})
+            tracks["typing"].append({"t0": t0, "t1": t1, "enter": enter, "until": loaded, "tab": tab["id"],
+                                     "text": text, "kind": kind})
             tracks["loading"].append({"t0": enter, "t1": loaded, "tab": tab["id"]})
             page_id = r.get("page")
             if page_id:
@@ -160,25 +188,27 @@ def build_scene(
             else:
                 flags.append("not_captured")
             shot(loaded, 1.0)
-            end = loaded + 250
-            start = click
+            omnibox_focused = None
+            end = loaded + 150
 
         elif kind == "click":
             box = r.get("box")
             page_id = r.get("page")
             if box:
                 y_top = box["y"] - tab["scroll"]
-                travel_at = start
-                if y_top < 40 or y_top + box["h"] > VIEW_H - 40:
+                needs_scroll = y_top < 40 or y_top + box["h"] > VIEW_H - 40
+                scroll_ms = 650.0 if needs_scroll else 0.0
+                begin, shift = lead(at - 90 - TRAVEL - scroll_ms)
+                travel_at = begin
+                if needs_scroll:
                     to = max(0.0, min(box["y"] - VIEW_H * 0.35, page_height(tab["page"]) - VIEW_H))
-                    dur = 700.0
-                    tracks["scroll"].append({"t0": start, "t1": start + dur, "tab": tab["id"], "page": tab["page"], "from": tab["scroll"], "to": to})
+                    tracks["scroll"].append({"t0": begin, "t1": begin + scroll_ms, "tab": tab["id"], "page": tab["page"],
+                                             "from": tab["scroll"], "to": to})
                     tab["scroll"] = to
-                    travel_at = start + dur
+                    travel_at = begin + scroll_ms
                 point = (CONTENT["x"] + box["x"] + min(box["w"], 240) / 2, CONTENT["y"] + box["y"] - tab["scroll"] + box["h"] / 2)
                 shot(travel_at, CAMERA_ZOOM, point)
-                click = move(travel_at, point)
-                first_cursor = first_cursor if first_cursor is not None else travel_at
+                click = max(move(travel_at, point), at - 90)
                 tracks["presses"].append({"t": click, "x": point[0], "y": point[1]})
                 end = click + PRESS
                 if page_id:
@@ -186,7 +216,7 @@ def build_scene(
                     tracks["loading"].append({"t0": click + PRESS, "t1": loaded, "tab": tab["id"]})
                     show(loaded, tab, page_id)
                     tab["history"] = tab["history"] + [page_id]
-                    end = loaded + 250
+                    end = loaded + 150
                 shot(end, 1.0)
             else:
                 flags.append("target_not_found")
@@ -198,21 +228,22 @@ def build_scene(
             else:
                 to = max(0.0, min(float(to), max(page_height(tab["page"]) - VIEW_H, 0.0)))
                 inside = (CONTENT["x"] + CONTENT["w"] * 0.62, CONTENT["y"] + CONTENT["h"] * 0.5)
-                at = start
-                if not (CONTENT["x"] <= cursor[0] <= CONTENT["x"] + CONTENT["w"] and CONTENT["y"] <= cursor[1] <= CONTENT["y"] + CONTENT["h"]):
-                    at = move(max(t_free, start - 500), inside, 500)
-                first_cursor = first_cursor if first_cursor is not None else start - 500
+                pointer_out = not (CONTENT["x"] <= cursor[0] <= CONTENT["x"] + CONTENT["w"]
+                                   and CONTENT["y"] <= cursor[1] <= CONTENT["y"] + CONTENT["h"])
+                begin, shift = lead(at - 80 - (450 if pointer_out else 0))
+                start_scroll = move(begin, inside, 450) if pointer_out else begin
                 distance = abs(to - tab["scroll"])
-                dur = 900 + min(distance, 3000) / 3000 * 700
+                dur = 650 + min(distance, 3000) / 3000 * 650  # a trackpad flick, then momentum
                 if distance > 1:
-                    tracks["scroll"].append({"t0": at, "t1": at + dur, "tab": tab["id"], "page": tab["page"], "from": tab["scroll"], "to": to})
+                    tracks["scroll"].append({"t0": start_scroll, "t1": start_scroll + dur, "tab": tab["id"], "page": tab["page"],
+                                             "from": tab["scroll"], "to": to})
                 tab["scroll"] = to
-                end = at + dur + 100
+                end = start_scroll + dur * 0.6  # the next action can start while momentum settles
 
         elif kind == "new_tab":
             point = _plus_point(len(tabs))
-            click = move(max(t_free, start - TRAVEL), point)
-            first_cursor = first_cursor if first_cursor is not None else click - TRAVEL
+            begin, shift = lead(at - 90 - TRAVEL)
+            click = max(move(begin, point), at - 90)
             tracks["presses"].append({"t": click, "x": point[0], "y": point[1]})
             new = {"id": f"t{len(tabs)}", "page": "start", "scroll": 0.0, "history": ["start"]}
             tabs.append(new)
@@ -220,7 +251,8 @@ def build_scene(
             tracks["tabs"].append({"t": click + PRESS, "id": new["id"]})
             tracks["active"].append({"t": click + PRESS, "id": new["id"]})
             tracks["tab_page"].append({"t": click + PRESS, "tab": new["id"], "page": "start"})
-            end = click + PRESS + 300
+            omnibox_focused = new["id"]  # Chrome focuses the address bar of a new tab
+            end = click + PRESS + 120
 
         elif kind == "switch_tab":
             index = action.get("tab", 0)
@@ -229,49 +261,50 @@ def build_scene(
                 flags.append("no_such_tab")
             elif index != active:
                 point = _tab_point(index)
-                click = move(max(t_free, start - TRAVEL), point)
-                first_cursor = first_cursor if first_cursor is not None else click - TRAVEL
+                begin, shift = lead(at - 90 - TRAVEL)
+                click = max(move(begin, point), at - 90)
                 tracks["presses"].append({"t": click, "x": point[0], "y": point[1]})
                 previous, active = active, index
+                omnibox_focused = None
                 tracks["active"].append({"t": click + PRESS, "id": tabs[index]["id"]})
-                end = click + PRESS + 200
+                end = click + PRESS + 120
 
         elif kind == "back":
             if len(tab["history"]) < 2:
                 flags.append("nothing_to_go_back_to")
             else:
                 point = BACK_BTN
-                click = move(max(t_free, start - TRAVEL), point)
-                first_cursor = first_cursor if first_cursor is not None else click - TRAVEL
+                begin, shift = lead(at - 90 - TRAVEL)
+                click = max(move(begin, point), at - 90)
                 tracks["presses"].append({"t": click, "x": point[0], "y": point[1]})
                 tab["history"] = tab["history"][:-1]
-                loaded = click + PRESS + 350
+                loaded = click + PRESS + 280  # back is served from cache
                 tracks["loading"].append({"t0": click + PRESS, "t1": loaded, "tab": tab["id"]})
                 show(loaded, tab, tab["history"][-1])
-                end = loaded + 200
+                end = loaded + 120
 
-        late = start - action["at_ms"]
-        if late > LATE_FLAG_MS:
+        if shift > LATE_FLAG_MS:
             flags.append("late")
         if action.get("source") == "rules":
             flags.append("rules_guess")
         if flags:
-            issues.append({"action_id": action["id"], "flags": sorted(set(flags)), "late_ms": round(max(late, 0))})
+            issues.append({"action_id": action["id"], "flags": sorted(set(flags)), "late_ms": round(max(shift, 0))})
         t_free = max(t_free, end)
 
     if tracks["camera"]:
         tracks["camera"].insert(0, {"t": 0, "zoom": 1.0, "fx": STAGE_W / 2, "fy": STAGE_H / 2})
 
-    cursor_in = max(0.0, (first_cursor if first_cursor is not None else duration_ms) - 300)
     return {
-        "version": 1,
+        "version": 2,
         "fps": fps,
         "duration_ms": duration_ms,
         "layout": LAYOUT,
         "pages": pages,
         "tabs": [{"id": t["id"]} for t in tabs],
         "tracks": tracks,
-        "cursor": {"in": cursor_in, "out": duration_ms + 1000, "start": [CONTENT["x"] + CONTENT["w"] * 0.6, CONTENT["y"] + CONTENT["h"] * 0.55]},
+        # A real screen recording: the pointer is on screen the whole time.
+        "cursor": {"in": -1000, "out": duration_ms + 1000, "start": [CONTENT["x"] + CONTENT["w"] * 0.6, CONTENT["y"] + CONTENT["h"] * 0.55]},
+        "clock_ms": clock_ms,
         "issues": issues,
         "results": {aid: {"page": r.get("page"), "link_text": r.get("link_text")} for aid, r in results.items()},
     }

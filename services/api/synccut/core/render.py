@@ -29,6 +29,14 @@ def _even(value: float) -> int:
 
 
 def pip_geometry(layout: dict, master: dict, width: int, height: int) -> dict:
+    if layout.get("pip_shape", "circle") == "circle":
+        # The speaker as a round avatar: a centred square crop of their video.
+        d = _even(width * float(layout.get("pip_width_pct", 0.22)) * 0.65)
+        margin = max(12, round(width / 48))
+        corner = layout.get("pip_corner", "bottom-left")
+        x = f"{margin}" if "left" in corner else f"W-w-{margin}"
+        y = f"{margin}" if corner.startswith("top") else f"H-h-{margin}"
+        return {"w": d, "h": d, "radius": d // 2, "x": x, "y": y, "circle": True}
     pip_w = _even(width * float(layout.get("pip_width_pct", 0.22)))
     aspect = (master["height"] / master["width"]) if master.get("width") else 9 / 16
     pip_h = _even(pip_w * aspect)
@@ -88,9 +96,10 @@ def segment_args(seg: dict, *, fps: int, preset: dict, layout: dict, pip: dict,
                      f"tpad=stop_mode=clone:stop_duration={pad_s},fps={fps},{fit}[bg]")
 
         if layout.get("pip_visible", True):
+            crop = "crop=min(iw\\,ih):min(iw\\,ih)," if pip.get("circle") else ""  # square, centred on the speaker
             args += ["-loop", "1", "-i", str(mask_path)]
             graph += (
-                f";[0:v]fps={fps},scale={pip['w']}:{pip['h']},setsar=1,"
+                f";[0:v]fps={fps},{crop}scale={pip['w']}:{pip['h']},setsar=1,"
                 f"tpad=stop_mode=clone:stop_duration={pad_s},format=yuva420p[pc]"
                 f";[2:v]format=gray,scale={pip['w']}:{pip['h']}[m]"
                 f";[pc][m]alphamerge[pip]"

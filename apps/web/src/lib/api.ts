@@ -60,7 +60,7 @@ export type Segment = {
 };
 
 export type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
-export type Layout = { pip_corner: Corner; pip_width_pct: number; pip_visible: boolean; camera_zoom?: boolean };
+export type Layout = { pip_corner: Corner; pip_width_pct: number; pip_visible: boolean; pip_shape?: "circle" | "rect"; camera_zoom?: boolean };
 
 export type ActionType = "navigate" | "search" | "scroll" | "click" | "new_tab" | "switch_tab" | "back";
 export type Action = {
@@ -137,6 +137,7 @@ export type Project = {
   share: Share;
   mode: "generate" | "record";
   page_url?: string;
+  page_shot?: { path: string; height: number; uploaded_at: number } | null;
   actions: Action[];
   actions_source: "claude" | "rules" | "user" | null;
   capture: { run: string; captured_at: number; pages: number } | null;
@@ -276,6 +277,12 @@ export const api = {
     form.append("file", file);
     return request<Project>(`/api/projects/${id}/subtitles`, { method: "POST", body: form });
   },
+  uploadPageShot: (id: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<Project>(`/api/projects/${id}/page/screenshot`, { method: "POST", body: form });
+  },
+  deletePageShot: (id: string) => request<Project>(`/api/projects/${id}/page/screenshot`, { method: "DELETE" }),
   setPage: (id: string, url: string) => request<Project>(`/api/projects/${id}/page`, json("PUT", { url })),
   setMode: (id: string, mode: Project["mode"]) => request<Project>(`/api/projects/${id}/mode`, json("PUT", { mode })),
   prepare: (id: string, replan: boolean) => request<Job>(`/api/projects/${id}/prepare`, json("POST", { replan })),

@@ -107,3 +107,55 @@ def test_page_link_must_be_public_web_url():
         assert res.status_code == 200 and res.json()["page_url"] == "https://8.8.8.8/jobs/1"
     finally:
         client.delete(f"/api/projects/{pid}")
+
+
+def test_title_from_url_for_screenshotted_pages():
+    from synccut.capture import title_from_url
+
+    assert title_from_url("https://www.upwork.com/jobs/CRM-Automation-Expert_~021234567890abcdef") == "CRM Automation Expert - Upwork"
+    assert title_from_url("https://www.upwork.com/jobs/~021234567890abcdef") == "Upwork"
+    assert title_from_url("https://acme.io/") == "Acme"
+
+
+def test_screenshot_upload_replaces_capture_for_the_linked_page(tmp_path, monkeypatch):
+    import io
+    import subprocess
+    from fastapi.testclient import TestClient
+    from synccut.main import app
+
+    png = tmp_path / "shot.png"
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=white:s=800x1200",
+                    "-frames:v", "1", str(png)], check=True)
+    client = TestClient(app)
+    pid = client.post("/api/projects", json={"name": "shot test"}).json()["id"]
+    try:
+        assert client.post(f"/api/projects/{pid}/page/screenshot", files={"file": ("a.png", png.read_bytes(), "image/png")}).status_code == 400
+        client.put(f"/api/projects/{pid}/page", json={"url": "https://www.upwork.com/jobs/CRM-Expert_~0123456789ab"})
+        bad = client.post(f"/api/projects/{pid}/page/screenshot", files={"file": ("a.svg", b"<svg><script>alert(1)</script></svg>", "image/svg+xml")})
+        assert bad.status_code == 422
+        res = client.post(f"/api/projects/{pid}/page/screenshot", files={"file": ("a.png", png.read_bytes(), "image/png")})
+        assert res.status_code == 200
+        shot = res.json()["page_shot"]
+        assert shot["path"] == "page/shot.jpg" and shot["height"] == 2430  # 800x1200 scaled to the 1620 px page width
+        # changing the link drops the screenshot
+        res = client.put(f"/api/projects/{pid}/page", json={"url": "https://example.com/other"})
+        assert res.json()["page_shot"] is None
+    finally:
+        client.delete(f"/api/projects/{pid}")
+
+
+def test_capture_uses_the_screenshot_without_fetching(tmp_path):
+    import subprocess
+    from synccut.capture import capture_actions
+    from synccut.core.actions import validate_actions
+
+    jpg = tmp_path / "s.jpg"
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=white:s=1620x2000",
+                    "-frames:v", "1", str(jpg)], check=True)
+    url = "https://www.upwork.com/jobs/CRM-Expert_~0123456789ab"
+    actions = validate_actions([{"type": "navigate", "at_ms": 0, "url": url}, {"type": "scroll", "at_ms": 3000, "target": "requirements"}], 10_000)
+    cap = capture_actions(actions, tmp_path / "out", lambda f, m: None, {url: {"path": jpg, "height": 2000, "uploaded_at": 1}})
+    page = cap["pages"]["p1"]
+    assert page["status"] == "ok" and page["title"] == "CRM Expert - Upwork" and page["height"] == 2000
+    assert (tmp_path / "out" / "p1.jpg").exists()
+    assert "scroll_text_not_found" not in cap["results"][actions[1]["id"]]["flags"]  # scrolls on the screenshot, no live lookup

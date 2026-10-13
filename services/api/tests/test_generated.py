@@ -81,3 +81,21 @@ def test_generated_timeline_is_valid_and_flags_steps():
     assert all(s["kind"] == "browser" and s["pieces"][0]["speed"] == 1.0 for s in tl["segments"])
     flagged = [s for s in tl["segments"] if s["needs_review"]]
     assert len(flagged) == 1 and "page_unavailable" in flagged[0]["flags"]
+
+
+def test_results_land_right_after_the_word_not_seconds_later():
+    from synccut.core.scene import LAND
+
+    scene = build_scene(ACTIONS, CAPTURE, 15_000)
+    shows = {e["page"]: e["t"] for e in scene["tracks"]["tab_page"] if e["page"] != "start"}
+    assert abs(shows["p1"] - (1500 + LAND)) < 1  # "open Google" at 1.5 s: page painted 0.22 s later
+    assert abs(shows["p2"] - (4000 + LAND)) < 1
+    assert scene["tracks"]["camera"] == []  # no zoom effect unless asked for
+    assert scene["cursor"]["in"] < 0  # pointer on screen from the first frame
+
+
+def test_linked_page_is_already_open_when_the_video_starts():
+    actions = validate_actions([{"type": "navigate", "at_ms": 0, "url": "https://www.google.com/", "source": "page"}], 15_000)
+    scene = build_scene(actions, {"pages": CAPTURE["pages"], "results": {actions[0]["id"]: {"flags": [], "page": "p1"}}}, 15_000)
+    assert scene["tracks"]["tab_page"][0] == {"t": 0, "tab": "t0", "page": "p1"}
+    assert scene["tracks"]["typing"] == [] and scene["issues"] == []

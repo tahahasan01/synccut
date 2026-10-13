@@ -2,7 +2,7 @@
 
 **Say it once. The browser follows.**
 
-SyncCut turns a video you've already recorded (you talking to camera) into a finished browser walkthrough. It reads your narration, opens the sites you mention at the moment you mention them, scrolls, types, clicks and switches tabs in a macOS-style browser, then exports one 1080p MP4 with you picture-in-picture and your original audio.
+SyncCut turns a video you've already recorded (you talking to camera) into a finished browser walkthrough. It transcribes your narration with word-level timestamps, opens the sites you mention at the moment you mention them, and scrolls, types, clicks and switches tabs in a generated MacBook screen (menu bar, dark Chrome window with tabs, omnibox and bookmarks, and the Dock). It then exports one 1080p MP4 with your video as a round avatar in a bottom corner and your original audio. It's built to look like a plain screen recording: no zoom or click effects, and each result appears right as you say it.
 
 You never record your screen.
 
@@ -146,8 +146,9 @@ Put settings in a `.env` file at the repository root (it is git-ignored).
 1. **Brand:** add your name, track record, profile link, booking link (Calendly or Cal.com) and portfolio. These appear on share pages.
 2. **Start a video** and upload your narration. Steps appear once it's transcribed (or click **Import subtitles**).
    Optionally paste **the page you're talking about**: the job posting you're replying to, or your own site. Phrases like "your job post", "the listing" or "my site" open it, and the video starts on it if you never name another site first. Changing it re-plans the actions.
+   Job posts (Upwork) and pages behind a login block automated browsers, so upload a **full-page screenshot** of the page there (Chrome DevTools: ⌘⇧P → *Capture full size screenshot*). The browser shows it under the real URL and can scroll it.
 3. **Browser actions:** check the cues in the script. Click a cue to change its time (±0.2 s), what it does, or its target. Click any word to add a cue there. **Save and capture pages** when you're done; timing-only changes don't re-capture.
-4. **Preview:** play it back, move or resize your video, and turn the zoom-on-actions camera on or off.
+4. **Preview:** play it back; choose a round avatar or a rectangle, its corner and size. The zoom-on-actions camera is off by default (on makes it look less like a real recording).
 5. **Export & share:** export the MP4, then publish the share page.
 
 Phrases the planner understands best: "open / go to *site*", "search for *…*", "scroll down / up / to the bottom / to *the pricing section*", "click *the first result* / *Pricing*", "open a new tab", "switch back to the first tab", "go back".

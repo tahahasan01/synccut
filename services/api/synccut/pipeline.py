@@ -116,13 +116,14 @@ def prepare(store: Store, ctx: JobContext, replan: bool) -> None:
         raise PipelineError("No browser actions were found in the narration. Add them by hand on the Actions tab.")
 
     current = load_capture(store, ctx.pid, project)
-    if capture_is_current(current, actions):
+    shots = page_screenshots(store, ctx.pid, project)
+    if capture_is_current(current, actions, shots):
         ctx.progress(1.0, "Pages already captured", force=True)
         return
 
     run = new_id("c")
     out_dir = store.project_dir(ctx.pid) / "capture" / run / "pages"
-    capture = capture_actions(actions, out_dir, lambda f, m: ctx.progress(0.08 + 0.9 * f, m))
+    capture = capture_actions(actions, out_dir, lambda f, m: ctx.progress(0.08 + 0.9 * f, m), shots)
     (out_dir.parent / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
     old = (project.get("capture") or {}).get("run")
 
@@ -142,14 +143,34 @@ def load_capture(store: Store, pid: str, project: dict) -> dict | None:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
+def page_screenshots(store: Store, pid: str, project: dict) -> dict[str, dict]:
+    """The user's screenshot of their linked page, keyed by its URL, for capture to use instead of loading it."""
+    shot, url = project.get("page_shot"), project.get("page_url")
+    if not shot or not url:
+        return {}
+    return {url: {"path": store.project_dir(pid) / shot["path"], "height": shot["height"], "uploaded_at": shot["uploaded_at"]}}
+
+
+def _wall_clock_ms(ts: float | None) -> float:
+    """Local wall-clock time as milliseconds since the epoch *as if it were UTC*, so the
+    stage can show the menu-bar clock with plain UTC getters and stay deterministic."""
+    import calendar
+    from datetime import datetime
+
+    if not ts:
+        return 0
+    return calendar.timegm(datetime.fromtimestamp(ts).timetuple()) * 1000.0
+
+
 def scene_for(store: Store, pid: str, project: dict) -> dict | None:
     capture = load_capture(store, pid, project)
     if capture is None or not project["master"] or not project["master"].get("probe"):
         return None
     layout = {**DEFAULT_LAYOUT, **(project.get("layout") or {})}
     scene = build_scene(project.get("actions") or [], capture, project["master"]["probe"]["duration_ms"],
-                        camera=bool(layout.get("camera_zoom", True)), fps=settings.fps)
-    scene["stale"] = not capture_is_current(capture, project.get("actions") or [])
+                        camera=bool(layout.get("camera_zoom", False)), fps=settings.fps,
+                        clock_ms=_wall_clock_ms((project.get("capture") or {}).get("captured_at")))
+    scene["stale"] = not capture_is_current(capture, project.get("actions") or [], page_screenshots(store, pid, project))
     return scene
 
 

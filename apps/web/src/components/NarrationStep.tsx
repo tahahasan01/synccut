@@ -185,7 +185,61 @@ function PageLink({ project, onChange }: { project: Project; onChange: (p: Proje
         )}
         {error && <Notice tone="bad">{error}</Notice>}
       </form>
+      {saved && !dirty && <PageShot project={project} onChange={onChange} />}
     </Card>
+  );
+}
+
+/** Job posts sit behind a login and bot check, so the page can come from the user's own screenshot. */
+function PageShot({ project, onChange }: { project: Project; onChange: (p: Project) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const shot = project.page_shot;
+
+  async function run(fn: () => Promise<Project>) {
+    setBusy(true);
+    setError(null);
+    try {
+      onChange(await fn());
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-5 border-t border-rule pt-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        {shot && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={`${mediaUrl(project.id, shot.path)}?v=${shot.uploaded_at}`} alt="Your screenshot of the page"
+            className="h-28 w-44 shrink-0 rounded-md border border-rule object-cover object-top" />
+        )}
+        <div className="min-w-0 space-y-2">
+          <p className="text-sm font-semibold text-ink">{shot ? "Using your screenshot of this page" : "Job post or a page behind a login?"}</p>
+          <p className="max-w-prose text-sm text-muted">
+            {shot
+              ? "The browser shows this image under the link above, so it looks exactly like your screen. Scrolling works on it."
+              : "Upwork and similar sites block automated browsers. Upload a full-page screenshot and the browser shows it under the link. In Chrome: open the page, press ⌘⌥I, then ⌘⇧P and run “Capture full size screenshot”."}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant={shot ? "secondary" : "primary"} disabled={busy} onClick={() => ref.current?.click()}>
+              {busy ? "Uploading…" : shot ? "Replace screenshot" : "Upload a screenshot"}
+            </Button>
+            {shot && <Button variant="ghost" disabled={busy} onClick={() => run(() => api.deletePageShot(project.id))}>Remove</Button>}
+          </div>
+          {error && <Notice tone="bad">{error}</Notice>}
+        </div>
+      </div>
+      <input ref={ref} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) run(() => api.uploadPageShot(project.id, file));
+        }} />
+    </div>
   );
 }
 

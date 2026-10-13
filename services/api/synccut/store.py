@@ -35,10 +35,14 @@ def with_defaults(project: dict) -> dict:
     project.setdefault("mode", "record" if project.get("takes") else "generate")
     project.setdefault("actions", [])
     project.setdefault("page_url", "")
+    project.setdefault("page_shot", None)
     project.setdefault("actions_source", None)
     project.setdefault("capture", None)
     project.setdefault("browser_video", None)
-    project.setdefault("layout", {"pip_corner": "bottom-left", "pip_width_pct": 0.22, "pip_visible": True, "camera_zoom": True})
+    project.setdefault("layout", {"pip_corner": "bottom-left", "pip_width_pct": 0.22, "pip_visible": True, "camera_zoom": False})
+    if not project["layout"].get("natural"):
+        # The zoom-on-action camera read as an effect, not a screen recording; it's now opt-in.
+        project["layout"].update(camera_zoom=False, natural=True)
     return project
 
 
