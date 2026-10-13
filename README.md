@@ -8,7 +8,7 @@ You never record your screen.
 
 ![SyncCut home page with the animated demo](docs/images/home.png)
 
-**Demo video (58 s):** [docs/SyncCut-demo.mp4](docs/SyncCut-demo.mp4). A dummy narration video and a real Upwork jobs page: upload, Whisper timestamps, AI-planned actions, export, then the finished MacBook-style recording with sound.
+**Demo video (63 s):** [docs/SyncCut-demo.mp4](docs/SyncCut-demo.mp4). A dummy narration video and a real Upwork jobs page: upload, Whisper timestamps, AI-planned actions (two windows, several tabs), export, then the finished MacBook-style recording with sound.
 
 ---
 
@@ -151,7 +151,7 @@ Put settings in a `.env` file at the repository root (it is git-ignored).
 4. **Preview:** play it back; choose a round avatar or a rectangle, its corner and size. The zoom-on-actions camera is off by default (on makes it look less like a real recording).
 5. **Export & share:** export the MP4, then publish the share page.
 
-Phrases the planner understands best: "open / go to *site*", "search for *…*", "scroll down / up / to the bottom / to *the pricing section*", "click *the first result* / *Pricing*", "open a new tab", "switch back to the first tab", "go back".
+Phrases the planner understands best: "open / go to *site*", "search for *…*", "scroll down / up / to the bottom / to *the pricing section*", "click *the first result* / *Pricing*", "open a new tab", "switch back to the first tab", "open a new window", "switch back to the first window", "go back". Up to three Chrome windows; each has its own tabs.
 
 ### Recording mode and the Chrome extension
 

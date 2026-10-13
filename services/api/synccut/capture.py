@@ -38,7 +38,7 @@ def raster_type(data: bytes) -> str | None:
     if data[:4] == b"\x00\x00\x01\x00":
         return "ico"
     return None
-from .core.scene import VIEW_H, VIEW_W
+from .core.scene import MAX_WINDOWS, VIEW_H, VIEW_W
 
 MAX_PAGE_H = 7000
 BLOCKED = re.compile(r"/sorry/|captcha|unusual traffic|just a moment|access denied|attention required|verify you are human", re.I)
@@ -81,7 +81,7 @@ LINKS_JS = """() => [...document.querySelectorAll('a[href], button, [role=button
              href: el.href || '', x: r.x + scrollX, y: r.y + scrollY, w: r.width, h: r.height }; })
   .filter(l => l.w > 4 && l.h > 4 && l.text && l.y < %d).slice(0, 400)""" % MAX_PAGE_H
 
-CAPTURE_VERSION = 4  # 4: Chrome-style window, 1620x808 viewport
+CAPTURE_VERSION = 5  # 5: Chrome window matched to macOS Chrome, 1620x812 viewport
 
 # "scroll to the history section" means the section, not the first word "history" on the
 # page (often a nav link at the top): prefer headings, then matches below the first screen.
@@ -258,11 +258,14 @@ def capture_actions(actions: list[dict], out_dir: Path, progress: Callable[[floa
                                   service_workers="block")
         guard_context(ctx)  # fast first filter; the proxy is the actual boundary
         tabs = [{"ctx": ctx, "live": None, "history": ["start"], "scroll": 0.0}]
-        active, previous = 0, 0
+        # Windows hold tabs (indices into `tabs`); "switch to tab 2" counts within the front window.
+        wins = [{"tabs": [0], "active": 0, "previous": 0}]
+        front, previous_window = 0, 0
         try:
             for i, action in enumerate(actions):
                 progress(i / max(len(actions), 1), f"Capturing step {i + 1} of {len(actions)}: {action['type']}")
-                tab = tabs[active]
+                w = wins[front]
+                tab = tabs[w["tabs"][w["active"]]]
                 r: dict = {"flags": [], "key": list(content_key(action))}
                 kind = action["type"]
                 current = cap.pages.get(tab["history"][-1])
@@ -319,13 +322,27 @@ def capture_actions(actions: list[dict], out_dir: Path, progress: Callable[[floa
                     r["scroll_to"] = round(y, 1)
                 elif kind == "new_tab":
                     tabs.append({"ctx": ctx, "live": None, "history": ["start"], "scroll": 0.0})
-                    previous, active = active, len(tabs) - 1
+                    w["tabs"].append(len(tabs) - 1)
+                    w["previous"], w["active"] = w["active"], len(w["tabs"]) - 1
                 elif kind == "switch_tab":
-                    index = previous if action.get("tab", 0) < 0 else action.get("tab", 0)
-                    if 0 <= index < len(tabs):
-                        previous, active = active, index
+                    index = w["previous"] if action.get("tab", 0) < 0 else action.get("tab", 0)
+                    if 0 <= index < len(w["tabs"]):
+                        w["previous"], w["active"] = w["active"], index
                     else:
                         r["flags"].append("no_such_tab")
+                elif kind == "new_window":
+                    if len(wins) >= MAX_WINDOWS:
+                        r["flags"].append("too_many_windows")
+                    else:
+                        tabs.append({"ctx": ctx, "live": None, "history": ["start"], "scroll": 0.0})
+                        wins.append({"tabs": [len(tabs) - 1], "active": 0, "previous": 0})
+                        previous_window, front = front, len(wins) - 1
+                elif kind == "switch_window":
+                    index = previous_window if action.get("tab", 0) < 0 else action.get("tab", 0)
+                    if 0 <= index < len(wins):
+                        previous_window, front = front, index
+                    else:
+                        r["flags"].append("no_such_window")
                 elif kind == "back":
                     if len(tab["history"]) > 1:
                         tab["history"] = tab["history"][:-1]

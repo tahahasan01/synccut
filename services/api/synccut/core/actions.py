@@ -10,7 +10,7 @@ from __future__ import annotations
 import bisect
 import re
 
-ACTION_TYPES = ("navigate", "search", "scroll", "click", "new_tab", "switch_tab", "back")
+ACTION_TYPES = ("navigate", "search", "scroll", "click", "new_tab", "switch_tab", "new_window", "switch_window", "back")
 
 KNOWN_SITES = {
     "google": "https://www.google.com/",
@@ -82,6 +82,10 @@ def normalize_words(words: list[dict]) -> list[dict]:
 
 
 PATTERNS: list[tuple[str, re.Pattern]] = [
+    ("new_window", re.compile(r"\b(?:open|opening|opens|pull up)\s+(?:up\s+)?(?:a\s+|another\s+)?(?:new\s+)?(?:browser\s+|chrome\s+)?window\b")),
+    ("switch_window", re.compile(
+        r"\b(?:switch|switching|go|going|jump|head|move)\s+(?:back\s+)?(?:over\s+)?to\s+(?:the\s+)?"
+        r"(?P<which>first|second|third|previous|other|last|original|old|main)\s+(?:browser\s+)?window\b")),
     ("new_tab", re.compile(r"\b(?:open|opening|opens)\s+(?:up\s+)?(?:a\s+)?new\s+tab\b")),
     ("switch_tab", re.compile(
         r"\b(?:switch|switching|go|going|jump|head)\s+(?:back\s+)?(?:over\s+)?to\s+(?:the\s+)?"
@@ -185,6 +189,10 @@ def _build(kind: str, m: re.Match) -> dict | None:
         if target in ("it", "that", "this", "here", "there", "on"):
             return None
         return {**base, "target": target}
+    if kind == "switch_window":
+        which = m.group("which")
+        index = {"first": 0, "original": 0, "old": 0, "main": 0, "second": 1, "third": 2}.get(which, -1)
+        return {**base, "tab": index}
     if kind == "switch_tab":
         which = m.group("which")
         tab = {"first": 0, "original": 0, "old": 0, "second": 1, "third": 2}.get(which, -1)

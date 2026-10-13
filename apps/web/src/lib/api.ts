@@ -62,7 +62,7 @@ export type Segment = {
 export type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 export type Layout = { pip_corner: Corner; pip_width_pct: number; pip_visible: boolean; pip_shape?: "circle" | "rect"; camera_zoom?: boolean };
 
-export type ActionType = "navigate" | "search" | "scroll" | "click" | "new_tab" | "switch_tab" | "back";
+export type ActionType = "navigate" | "search" | "scroll" | "click" | "new_tab" | "switch_tab" | "new_window" | "switch_window" | "back";
 export type Action = {
   id: string;
   type: ActionType;

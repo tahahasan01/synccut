@@ -366,7 +366,7 @@ def start_prepare(pid: str, body: PrepareIn) -> dict:
 
 class ActionIn(BaseModel):
     id: str | None = None
-    type: Literal["navigate", "search", "scroll", "click", "new_tab", "switch_tab", "back"]
+    type: Literal["navigate", "search", "scroll", "click", "new_tab", "switch_tab", "new_window", "switch_window", "back"]
     at_ms: float = Field(ge=0)
     url: str = Field("", max_length=2000)
     query: str = Field("", max_length=300)

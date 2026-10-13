@@ -1,4 +1,4 @@
-/* SyncCut stage: a MacBook screen with a Chrome-style browser, driven by a scene timeline.
+/* SyncCut stage: a MacBook screen with one or more Chrome windows, driven by a scene timeline.
  *
  * Everything on screen is a pure function of time: stage.seek(ms) draws the
  * exact state at that moment and returns a signature string, which the renderer
@@ -6,9 +6,10 @@
  * the editor; render mode is driven by headless Chromium frame by frame.
  *
  * It should read as a plain screen recording: the macOS pointer is always on
- * screen, moves on a slight arc, and clicks without effects; pages swap in the
- * moment they "load" while the tab shows Chrome's spinner. The optional camera
- * push-in (off by default) follows the interactive-product-demo skill.
+ * screen, moves on a slight arc and clicks without effects; pages swap in the
+ * moment they "load" while the tab shows Chrome's spinner; new tabs slide open
+ * and new windows zoom in the way macOS opens them. The optional camera push-in
+ * (off by default) follows the interactive-product-demo skill.
  */
 (() => {
   "use strict";
@@ -19,6 +20,8 @@
 
   const CAM_MS = 800;
   const PAN = 0.85;
+  const TAB_OPEN_MS = 170;
+  const WINDOW_OPEN_MS = 240;
   const W = 1920, H = 1080;
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -54,38 +57,75 @@
     return found;
   };
 
+  const SVG = (inner, cls = "") => `<svg ${cls ? `class="${cls}" ` : ""}viewBox="0 0 24 24">${inner}</svg>`;
   const ICON = {
-    search: '<svg class="lead" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></svg>',
-    tune: '<svg class="lead" viewBox="0 0 24 24"><path d="M4 8h9M17 8h3M4 16h3M11 16h9"/><circle cx="15" cy="8" r="2.2"/><circle cx="9" cy="16" r="2.2"/></svg>',
-    globe: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg>',
-    star: '<svg class="star" viewBox="0 0 24 24"><path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9Z"/></svg>',
-    reload: '<svg viewBox="0 0 24 24"><path d="M19 12a7 7 0 1 1-2.05-4.95M19 4.5V8h-3.5"/></svg>',
-    stop: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+    search: SVG('<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/>'),
+    tune: SVG('<path d="M4 8h9M17 8h3M4 16h3M11 16h9"/><circle cx="15" cy="8" r="2.2"/><circle cx="9" cy="16" r="2.2"/>'),
+    globe: SVG('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/>'),
+    star: SVG('<path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9Z"/>'),
+    lens: SVG('<rect x="3.5" y="3.5" width="17" height="17" rx="5"/><circle cx="12" cy="12" r="3.2"/>'),
+    back: SVG('<path d="M19 12H5M11 6l-6 6 6 6"/>'),
+    fwd: SVG('<path d="M5 12h14M13 6l6 6-6 6"/>'),
+    reload: SVG('<path d="M19 12a7 7 0 1 1-2.05-4.95M19 4.5V8h-3.5"/>'),
+    stop: SVG('<path d="M6 6l12 12M18 6 6 18"/>'),
+    x: SVG('<path d="M7 7l10 10M17 7 7 17"/>', "x"),
   };
 
-  // Generic Dock apps: simple glyphs, no real product logos.
-  const tile = (bg, inner) => `<svg viewBox="0 0 64 64"><defs>${bg.defs || ""}</defs><rect x="2" y="2" width="60" height="60" rx="14" fill="${bg.fill}"/>${inner}</svg>`;
-  const grad = (id, a, b) => ({ defs: `<linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient>`, fill: `url(#${id})` });
+  // Chrome toolbar extensions: small coloured glyphs, as installed extensions look.
+  const EXTENSIONS = [
+    '<rect x="3" y="5" width="18" height="14" rx="3" fill="#9aa0a6"/><circle cx="12" cy="12" r="3.5" fill="#3b3a43"/>',
+    '<circle cx="12" cy="12" r="8.5" fill="none" stroke="#f29900" stroke-width="3"/><circle cx="12" cy="12" r="3" fill="#7b61ff"/>',
+    '<path d="M12 3 20 12 12 21 4 12Z" fill="#8a5cf6"/>',
+    '<rect x="5" y="3" width="14" height="18" rx="2.5" fill="#e8eaed"/><path d="M8 8h8M8 12h8M8 16h5" stroke="#4285f4" stroke-width="1.8"/>',
+    '<rect x="3" y="3" width="18" height="18" rx="4" fill="#1a73e8"/><text x="12" y="16.5" text-anchor="middle" font-size="11" font-weight="800" fill="#fff" font-family="-apple-system,Segoe UI,sans-serif">F</text>',
+    '<circle cx="12" cy="12" r="9" fill="#ea4335"/><circle cx="12" cy="12" r="4" fill="#fff"/>',
+    '<path d="M12 3 19 6v6c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V6Z" fill="#5f6368" stroke="#bdc1c6" stroke-width="1.4"/>',
+    '<circle cx="12" cy="12" r="9" fill="#1e8e3e"/><path d="m10 8 6 4-6 4Z" fill="#fff"/>',
+    '<rect x="3" y="4" width="18" height="16" rx="3" fill="#c5221f"/><path d="M6 15l4-4 3 3 5-5" stroke="#fff" stroke-width="1.8" fill="none"/>',
+  ];
+  const AVATAR = '<svg viewBox="0 0 26 26"><rect width="26" height="26" fill="#7a5a48"/><circle cx="13" cy="10.5" r="5" fill="#e3b28f"/><path d="M3 26c1-6 5-9 10-9s9 3 10 9Z" fill="#2f3b4c"/><path d="M8 9c0-4 2.5-5.5 5-5.5S18 5 18 9c-1.5-1.8-3-2.4-5-2.4S9.5 7.2 8 9Z" fill="#2a1d16"/></svg>';
+
+  // Dock apps: generic glyphs on macOS-style squircle tiles, no real product logos.
+  const squircle = (() => {
+    const n = 5, c = 32, a = 29, pts = [];
+    for (let i = 0; i < 72; i++) {
+      const th = (i / 72) * Math.PI * 2, co = Math.cos(th), si = Math.sin(th);
+      pts.push(`${(c + a * Math.sign(co) * Math.pow(Math.abs(co), 2 / n)).toFixed(2)} ${(c + a * Math.sign(si) * Math.pow(Math.abs(si), 2 / n)).toFixed(2)}`);
+    }
+    return `M${pts.join("L")}Z`;
+  })();
+  let tileN = 0;
+  const tile = (fill, inner, defs = "") => {
+    const id = `sq${tileN++}`;
+    return `<svg viewBox="0 0 64 64"><defs><clipPath id="${id}"><path d="${squircle}"/></clipPath>${defs}</defs>` +
+      `<g clip-path="url(#${id})"><rect width="64" height="64" fill="${fill}"/>${inner}</g>` +
+      `<path d="${squircle}" fill="none" stroke="rgba(255,255,255,.18)" stroke-width="1"/></svg>`;
+  };
+  const grad = (id, a, b) => [`url(#${id})`, `<linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient>`];
+  const gtile = (id, a, b, inner) => {
+    const [fill, defs] = grad(id, a, b);
+    return tile(fill, inner, defs);
+  };
   const DOCK_APPS = [
-    { run: true, svg: tile(grad("g1", "#6ec6ff", "#1e7bdc"), '<path d="M14 22h14l4 5h18v19H14Z" fill="#fff" opacity=".95"/>') },
-    { svg: tile(grad("g2", "#5b5d66", "#2e3038"), [0, 1, 2].map((r) => [0, 1, 2].map((c) => `<rect x="${15 + c * 13}" y="${15 + r * 13}" width="9" height="9" rx="2.5" fill="${["#ff6b6b", "#ffd43b", "#69db7c", "#4dabf7", "#da77f2", "#ff922b", "#38d9a9", "#748ffc", "#f783ac"][r * 3 + c]}"/>`).join("")).join("")) },
-    { svg: tile({ fill: "#f4f6fa" }, '<circle cx="32" cy="32" r="21" fill="none" stroke="#1d8cf8" stroke-width="4"/><path d="m40 24-5 11-11 5 5-11Z" fill="#ff4d4f"/><path d="m24 40 5-11 6 6Z" fill="#c9d3e3"/>') },
-    { svg: tile({ fill: "#1f2937" }, '<path d="M16 20h32v20H16Z" fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"/><path d="m22 26 5 4-5 4M30 35h9" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>') },
-    { badge: "1", svg: tile(grad("g3", "#a1a6b0", "#5e636d"), '<circle cx="32" cy="32" r="13" fill="none" stroke="#e9ecf1" stroke-width="7" stroke-dasharray="5 4"/><circle cx="32" cy="32" r="8" fill="#3d4149"/><circle cx="32" cy="32" r="4" fill="#d5d9df"/>') },
-    { svg: tile(grad("g4", "#59b0ff", "#1769e0"), '<rect x="15" y="20" width="34" height="24" rx="3" fill="#fff"/><path d="m16 22 16 12 16-12" fill="none" stroke="#1769e0" stroke-width="2.5"/>') },
-    { svg: tile(grad("g5", "#6ff08a", "#21b04b"), '<path d="M32 16c10 0 18 6.5 18 14.5S42 45 32 45c-2 0-4-.3-5.8-.8L18 48l2.6-6.6C16.5 38.8 14 35 14 30.5 14 22.5 22 16 32 16Z" fill="#fff"/>') },
-    { svg: tile({ fill: "#fff" }, '<path d="M2 16a14 14 0 0 1 14-14h32a14 14 0 0 1 14 14v6H2Z" fill="#ff3b30"/><text x="32" y="17" text-anchor="middle" font-size="11" font-weight="700" fill="#fff" font-family="-apple-system,Segoe UI,sans-serif">OCT</text><text x="32" y="50" text-anchor="middle" font-size="26" font-weight="300" fill="#222" font-family="-apple-system,Segoe UI,sans-serif">13</text>') },
-    { svg: tile({ fill: "#fffdf3" }, '<path d="M2 16a14 14 0 0 1 14-14h32a14 14 0 0 1 14 14v4H2Z" fill="#ffd60a"/><path d="M14 32h36M14 40h36M14 48h24" stroke="#d9d4c3" stroke-width="2"/>') },
-    { svg: tile(grad("g6", "#ff7a93", "#fa2d48"), '<path d="M27 42V22l16-4v20" fill="none" stroke="#fff" stroke-width="3.5" stroke-linejoin="round"/><circle cx="23" cy="42" r="5" fill="#fff"/><circle cx="39" cy="38" r="5" fill="#fff"/>') },
-    { svg: tile({ fill: "#fff" }, ["#ff9f0a", "#ffd60a", "#30d158", "#64d2ff", "#5e5ce6", "#ff375f"].map((c, i) => `<ellipse cx="32" cy="20" rx="6" ry="11" fill="${c}" opacity=".85" transform="rotate(${i * 60} 32 32)"/>`).join("")) },
-    { run: true, svg: tile(grad("g7", "#3aa0ff", "#0b5cd6"), '<path d="m26 22-10 10 10 10M38 22l10 10-10 10" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>') },
-    { run: true, svg: tile(grad("g8", "#8b7cff", "#5a3fe0"), '<path d="M16 20h22a4 4 0 0 1 4 4v12a4 4 0 0 1-4 4H26l-7 6v-6h-3a4 4 0 0 1-4-4V24a4 4 0 0 1 4-4Z" fill="#fff"/><circle cx="21" cy="30" r="2" fill="#5a3fe0"/><circle cx="27" cy="30" r="2" fill="#5a3fe0"/><circle cx="33" cy="30" r="2" fill="#5a3fe0"/>') },
-    { svg: tile(grad("g9", "#4be0b0", "#0e9f78"), '<rect x="13" y="22" width="26" height="20" rx="4" fill="#fff"/><path d="m41 28 10-6v20l-10-6Z" fill="#fff"/>') },
-    { svg: tile(grad("g10", "#ffb340", "#ff6a00"), '<circle cx="32" cy="32" r="14" fill="none" stroke="#fff" stroke-width="4"/><path d="M32 22v10l7 5" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round"/>') },
-    { run: true, svg: tile(grad("g11", "#2e3b55", "#151c2c"), '<circle cx="32" cy="32" r="17" fill="none" stroke="#7cc4ff" stroke-width="3.5"/><path d="M15 32h34M32 15c6 6 6 28 0 34M32 15c-6 6-6 28 0 34" fill="none" stroke="#7cc4ff" stroke-width="3"/>') },
+    { run: true, svg: gtile("d1", "#74c7ff", "#1d7ae0", '<path d="M14 21h14l4 5h18v20H14Z" fill="#fff" opacity=".95"/><path d="M14 30h36" stroke="#1d7ae0" stroke-width="1.5" opacity=".35"/>') },
+    { svg: gtile("d2", "#5e6069", "#30323a", [0, 1, 2].map((r) => [0, 1, 2].map((c) => `<rect x="${15 + c * 13}" y="${15 + r * 13}" width="9" height="9" rx="2.5" fill="${["#ff6b6b", "#ffd43b", "#69db7c", "#4dabf7", "#da77f2", "#ff922b", "#38d9a9", "#748ffc", "#f783ac"][r * 3 + c]}"/>`).join("")).join("")) },
+    { svg: tile("#f5f7fb", '<circle cx="32" cy="32" r="20" fill="none" stroke="#1d8cf8" stroke-width="4"/><path d="m40 24-5 11-11 5 5-11Z" fill="#ff4d4f"/><path d="m24 40 5-11 6 6Z" fill="#c9d3e3"/>') },
+    { svg: tile("#1f2430", '<rect x="14" y="19" width="36" height="26" rx="3" fill="none" stroke="#fff" stroke-width="3"/><path d="m21 27 5 4-5 4M29 36h9" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>') },
+    { badge: "1", svg: gtile("d3", "#a5aab3", "#5f646e", '<circle cx="32" cy="32" r="13" fill="none" stroke="#eceff3" stroke-width="7" stroke-dasharray="5 4"/><circle cx="32" cy="32" r="8" fill="#3e424b"/><circle cx="32" cy="32" r="4" fill="#d7dbe1"/>') },
+    { svg: gtile("d4", "#5cb2ff", "#1769e0", '<rect x="14" y="20" width="36" height="25" rx="3" fill="#fff"/><path d="m15 22 17 12 17-12" fill="none" stroke="#1769e0" stroke-width="2.5"/>') },
+    { svg: gtile("d5", "#72f08d", "#22b14c", '<path d="M32 15c10.5 0 19 6.8 19 15.2S42.5 45.4 32 45.4c-2 0-4-.3-5.9-.8L17.5 48l2.7-6.8C16 38.4 13 34.6 13 30.2 13 21.8 21.5 15 32 15Z" fill="#fff"/>') },
+    { svg: tile("#fff", '<rect width="64" height="20" fill="#ff3b30"/><text x="32" y="15" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff" font-family="-apple-system,Segoe UI,sans-serif">OCT</text><text x="32" y="49" text-anchor="middle" font-size="27" font-weight="300" fill="#222" font-family="-apple-system,Segoe UI,sans-serif">13</text>') },
+    { svg: tile("#fffdf2", '<rect width="64" height="18" fill="#ffd60a"/><path d="M13 30h38M13 38h38M13 46h26" stroke="#d6d1bf" stroke-width="2"/>') },
+    { svg: gtile("d6", "#ff7c95", "#fa2d48", '<path d="M27 43V22l16-4v20" fill="none" stroke="#fff" stroke-width="3.5" stroke-linejoin="round"/><circle cx="23" cy="43" r="5" fill="#fff"/><circle cx="39" cy="38" r="5" fill="#fff"/>') },
+    { svg: tile("#fff", ["#ff9f0a", "#ffd60a", "#30d158", "#64d2ff", "#5e5ce6", "#ff375f"].map((c, i) => `<ellipse cx="32" cy="20" rx="6" ry="11" fill="${c}" opacity=".88" transform="rotate(${i * 60} 32 32)"/>`).join("")) },
+    { run: true, svg: gtile("d7", "#3ea2ff", "#0b5cd6", '<path d="m26 22-10 10 10 10M38 22l10 10-10 10" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>') },
+    { run: true, svg: gtile("d8", "#8e80ff", "#5a3fe0", '<path d="M16 20h22a4 4 0 0 1 4 4v12a4 4 0 0 1-4 4H26l-7 6v-6h-3a4 4 0 0 1-4-4V24a4 4 0 0 1 4-4Z" fill="#fff"/><circle cx="21" cy="30" r="2" fill="#5a3fe0"/><circle cx="27" cy="30" r="2" fill="#5a3fe0"/><circle cx="33" cy="30" r="2" fill="#5a3fe0"/>') },
+    { svg: gtile("d9", "#4fe2b3", "#0e9f78", '<rect x="12" y="22" width="27" height="20" rx="4" fill="#fff"/><path d="m41 28 11-6v20l-11-6Z" fill="#fff"/>') },
+    { svg: gtile("d10", "#ffb544", "#ff6a00", '<circle cx="32" cy="32" r="14" fill="none" stroke="#fff" stroke-width="4"/><path d="M32 22v10l7 5" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round"/>') },
+    { run: true, svg: gtile("d11", "#33415e", "#141b2b", '<circle cx="32" cy="32" r="17" fill="none" stroke="#7cc4ff" stroke-width="3.5"/><path d="M15 32h34M32 15c6 6 6 28 0 34M32 15c-6 6-6 28 0 34" fill="none" stroke="#7cc4ff" stroke-width="3"/>') },
     { sep: true },
-    { svg: tile(grad("g12", "#6ec6ff", "#1e7bdc"), '<path d="M14 22h14l4 5h18v19H14Z" fill="#fff" opacity=".95"/><path d="M32 30v11M27 36l5 5 5-5" stroke="#1e7bdc" stroke-width="3" fill="none" stroke-linecap="round"/>') },
-    { svg: '<svg viewBox="0 0 64 64"><path d="M17 18h30l-3 38H20Z" fill="rgba(235,240,248,.55)" stroke="rgba(255,255,255,.7)" stroke-width="1.5"/><rect x="14" y="13" width="36" height="6" rx="3" fill="rgba(235,240,248,.75)"/><path d="M26 25v24M32 25v24M38 25v24" stroke="rgba(120,130,150,.6)" stroke-width="1.6"/></svg>' },
+    { svg: gtile("d12", "#74c7ff", "#1d7ae0", '<path d="M14 21h14l4 5h18v20H14Z" fill="#fff" opacity=".95"/><path d="M32 30v11M27 36l5 5 5-5" stroke="#1d7ae0" stroke-width="3" fill="none" stroke-linecap="round"/>') },
+    { svg: '<svg viewBox="0 0 64 64"><path d="M17 18h30l-3 38H20Z" fill="rgba(235,240,248,.5)" stroke="rgba(255,255,255,.7)" stroke-width="1.5"/><rect x="14" y="13" width="36" height="6" rx="3" fill="rgba(235,240,248,.72)"/><path d="M26 25v24M32 25v24M38 25v24" stroke="rgba(120,130,150,.6)" stroke-width="1.6"/></svg>' },
   ];
 
   // Night coast: dark ridges falling to the sea, lit by a cold sky.
@@ -111,19 +151,106 @@
     <path d="M0 470 C140 452 250 500 380 520 C520 545 620 600 760 640 C900 680 1050 690 1200 712 C1380 738 1560 770 1720 790 C1810 800 1880 806 1920 810" fill="none" stroke="#8fc7dc" stroke-opacity=".35" stroke-width="3"/>
   </svg>`;
 
+  const MENU_STATUS = [
+    '<rect x="3" y="6" width="18" height="12" rx="2.5"/><circle cx="12" cy="12" r="2.5" class="fill"/>',
+    '<path d="M4 17c2-6 5-9 8-9s6 3 8 9"/><path d="M8 17h8"/>',
+    '<path d="M12 3v10M8 9l4 4 4-4M5 15v4h14v-4"/>',
+    '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9h6v6H9Z"/>',
+    '<path d="M7 7l10 10-5 5V2l5 5L7 17"/>',
+    '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>',
+    '<path d="M12 4v16M4 12h16" />',
+  ];
+
   let S, L, tr;
-  const dom = { tabs: {}, pages: {} };
+  const dom = { windows: {}, tabs: {} };
   let perTab = {};
   const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  function newTabPage(parent) {
+    return el("div", "page start", parent,
+      `<div class="box">${ICON.search}Search or type a URL</div>` +
+      '<div class="tiles">' + [["U", "Upwork", "#14a800"], ["M", "Inbox", "#c5221f"], ["P", "Projects", "#5b4bd6"], ["D", "Docs", "#1a73e8"], ["C", "Calendar", "#0b8043"], ["+", "Add shortcut", "#4a4953"]]
+        .map(([l, t, c]) => `<div class="tile"><i>${l === "+" ? "+" : `<b style="background:${c}">${l}</b>`}</i>${t}</div>`).join("") + "</div>");
+  }
+
+  function buildWindow(win, camera, loads) {
+    const r = win.rect;
+    const root = el("div", "window", camera);
+    Object.assign(root.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` });
+
+    const strip = el("div", "tabstrip", root);
+    strip.style.height = `${L.tabstrip_h}px`;
+    el("div", "lights", strip, "<i></i><i></i><i></i>");
+    el("div", "tabsearch", strip, '<svg viewBox="0 0 24 24" style="padding:5px"><path d="m7 10 5 5 5-5"/></svg>');
+    const plus = el("div", "plus", strip, '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>');
+    plus.style.top = `${(L.tabstrip_h - 28) / 2 + 2}px`;
+
+    const toolbar = el("div", "toolbar", root);
+    Object.assign(toolbar.style, { top: `${L.tabstrip_h}px`, height: `${L.toolbar_h}px` });
+    const nav = el("div", "nav", toolbar, `<span class="back">${ICON.back}</span><span class="dim">${ICON.fwd}</span><span class="reload"></span>`);
+    const o = L.omnibox;
+    const omni = el("div", "omnibox", toolbar);
+    Object.assign(omni.style, { left: `${o.left}px`, top: `${(L.toolbar_h - o.h) / 2}px`, width: `${r.w - o.left - o.right}px`, height: `${o.h}px` });
+    const omniLead = el("span", "chip", omni);
+    const omniText = el("div", "text", omni);
+    const omniEnd = el("span", "end", omni);
+    const suggest = el("div", "suggest", omni);
+    el("div", "tools", toolbar,
+      EXTENSIONS.map((g) => `<span class="ext"><svg viewBox="0 0 24 24">${g}</svg></span>`).join("") +
+      '<svg viewBox="0 0 24 24"><path d="M10 4h4v3a2 2 0 1 0 4 0V4h2v6h-3a2 2 0 1 0 0 4h3v6h-6v-3a2 2 0 1 0-4 0v3H4v-6h3a2 2 0 1 0 0-4H4V4h6Z"/></svg>' +
+      `<span class="avatar">${AVATAR}</span><svg viewBox="0 0 24 24"><circle cx="12" cy="5.5" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="12" cy="18.5" r="1.2"/></svg>`);
+
+    const folder = '<svg viewBox="0 0 24 24"><path d="M3 6h7l2 2.5h9V19H3Z"/></svg>';
+    const bm = el("div", "bookmarks", root,
+      '<span class="bm"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/></svg></span>' +
+      '<span class="bm"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg></span>' +
+      '<span class="divider"></span>' +
+      [["#14a800", "up", "Upwork"], ["#ea4335", "M", "Inbox (683)"], ["#7b68ee", "C", "Client projects"], ["#2684ff", "P", "Proposals"], ["#f4b400", "$", "Invoices"], ["#34a853", "D", "Docs"]]
+        .map(([c, g, t]) => `<span class="bm"><i style="background:${c}">${esc(g)}</i>${esc(t)}</span>`).join("") +
+      `<span class="bm">${folder}Useful tools</span><span class="bm right">${folder}All Bookmarks</span>`);
+    Object.assign(bm.style, { top: `${L.tabstrip_h + L.toolbar_h}px`, height: `${L.bookmarks_h}px` });
+
+    const content = el("div", "content", root);
+    content.style.top = `${L.tabstrip_h + L.toolbar_h + L.bookmarks_h}px`;
+    const pages = {};
+    for (const [id, page] of Object.entries(S.pages)) {
+      let p;
+      if (page.status === "start") {
+        p = { root: newTabPage(content) };
+      } else if (page.image) {
+        const pr = el("div", "page", content);
+        const img = el("img", "", pr);
+        img.alt = "";
+        img.src = ASSETS + page.image;
+        loads.push(img.decode().catch(() => {}));
+        p = { root: pr, img };
+      } else {
+        const host = splitUrl(page.url).host || "This site";
+        p = { root: el("div", "page placeholder-page", content,
+          `<div class="card"><svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#b9b7c2" stroke-width="1.5"><path d="M4 5h16v12H4ZM8 21h8M12 17v4"/><path d="m9 9 6 4M15 9l-6 4"/></svg>` +
+          `<b>This site can’t be reached</b><span>${esc(host)} took too long to respond.</span></div>`) };
+      }
+      pages[id] = p;
+    }
+    dom.windows[win.id] = { root, strip, plus, back: nav.querySelector(".back"), reload: nav.querySelector(".reload"),
+      omni, omniLead, omniText, omniEnd, suggest, pages, key: {} };
+  }
 
   function build(scene) {
     S = scene;
     L = scene.layout;
     tr = scene.tracks;
-    for (const k of ["moves", "presses", "tabs", "active", "tab_page", "typing", "loading", "scroll", "camera"]) {
+    for (const k of ["moves", "presses", "windows", "front", "tabs", "active", "tab_page", "typing", "loading", "scroll", "camera"]) {
       tr[k] = (tr[k] || []).slice().sort((a, b) => (a.t ?? a.t0) - (b.t ?? b.t0));
     }
+    // older scenes had one window and no window ids
+    if (!S.windows) S.windows = [{ id: "w0", index: 0, rect: L.window }];
+    if (!tr.windows.length) tr.windows = [{ t: 0, id: "w0" }];
+    if (!tr.front.length) tr.front = [{ t: 0, id: "w0" }];
+    for (const t of S.tabs) t.win = t.win || "w0";
+    for (const x of tr.tabs) x.win = x.win || "w0";
+    for (const x of tr.active) x.win = x.win || "w0";
     perTab = {};
     for (const e of tr.tab_page) (perTab[e.tab] = perTab[e.tab] || []).push(e);
 
@@ -132,14 +259,11 @@
     const camera = el("div", "", stage);
     camera.id = "camera";
     camera.innerHTML = WALLPAPER;
-    const w = L.window;
 
     const menubar = el("div", "menubar", camera,
       '<div class="menus"><b>Chrome</b><span>File</span><span>Edit</span><span>View</span><span>History</span><span>Bookmarks</span><span>Profiles</span><span>Tab</span><span>Window</span><span>Help</span></div>' +
-      '<div class="status">' +
-      '<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2.5"/><circle cx="12" cy="12" r="2.5" class="fill"/></svg>' +
-      '<svg viewBox="0 0 24 24"><path d="M12 3v10M8 9l4 4 4-4M5 15v4h14v-4"/></svg>' +
-      '<svg viewBox="0 0 24 24"><path d="M7 7l10 10-5 5V2l5 5L7 17"/></svg>' +
+      '<div class="status">' + MENU_STATUS.map((g) => `<svg viewBox="0 0 24 24">${g}</svg>`).join("") +
+      '<svg viewBox="0 0 24 24"><path d="M12 3v18M7 7.5l10 9-5 4.5V3l5 4.5-10 9"/></svg>' +
       '<svg viewBox="0 0 28 24"><rect x="1.5" y="6" width="22" height="12" rx="3.5"/><rect x="4" y="8.5" width="13" height="7" rx="1.6" class="fill"/><path d="M26 10v4"/></svg>' +
       '<svg viewBox="0 0 24 24"><path d="M2 9a15 15 0 0 1 20 0M5.5 12.5a10 10 0 0 1 13 0M9 16a5 5 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1.2" class="fill"/></svg>' +
       '<svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>' +
@@ -148,98 +272,38 @@
     menubar.style.height = `${L.menubar_h}px`;
     dom.clock = menubar.querySelector(".clock");
 
-    const d = L.dock;
-    const dock = el("div", "dock", camera);
-    for (const app of DOCK_APPS) {
-      if (app.sep) {
-        el("div", "sep", dock);
-        continue;
-      }
-      const a = el("div", `app${app.run ? " running" : ""}`, dock, app.svg + (app.badge ? `<span class="badge">${app.badge}</span>` : ""));
-      Object.assign(a.style, { width: `${d.icon}px`, height: `${d.icon}px` });
-    }
-    Object.assign(dock.style, { height: `${d.h}px`, top: `${d.y}px` });
-    dock.style.left = "0px";
-    camera.appendChild(dock);
-    dock.style.left = `${(W - dock.offsetWidth) / 2}px`;
-
-    const win = el("div", "window", camera);
-    Object.assign(win.style, { left: `${w.x}px`, top: `${w.y}px`, width: `${w.w}px`, height: `${w.h}px` });
-
-    // tab strip
-    const strip = el("div", "tabstrip", win);
-    strip.style.height = `${L.tabstrip_h}px`;
-    el("div", "lights", strip, "<i></i><i></i><i></i>");
-    el("div", "tabsearch", strip, '<svg viewBox="0 0 24 24" style="padding:5px"><path d="m7 10 5 5 5-5"/></svg>');
-    scene.tabs.forEach((t, i) => {
-      const tab = el("div", "tab", strip,
-        '<span class="fav globe"></span><span class="title"></span><svg class="x" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></svg>');
-      Object.assign(tab.style, { left: `${L.tabs.x - w.x + i * (L.tabs.w + 4)}px`, top: `${L.tabs.y - w.y}px`, width: `${L.tabs.w}px`, height: `${L.tabstrip_h - (L.tabs.y - w.y)}px` });
-      dom.tabs[t.id] = { root: tab, fav: tab.querySelector(".fav"), title: tab.querySelector(".title"), favKey: null };
-    });
-    dom.plus = el("div", "plus", strip, '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>');
-    dom.plus.style.top = `${(L.tabstrip_h - 28) / 2 + 1}px`;
-
-    // toolbar
-    const toolbar = el("div", "toolbar", win);
-    Object.assign(toolbar.style, { top: `${L.tabstrip_h}px`, height: `${L.toolbar_h}px` });
-    const nav = el("div", "nav", toolbar,
-      '<svg viewBox="0 0 24 24" class="back"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>' +
-      '<svg viewBox="0 0 24 24" class="dim"><path d="M5 12h14M13 6l6 6-6 6"/></svg><span class="reload"></span>');
-    dom.back = nav.querySelector(".back");
-    dom.reload = nav.querySelector(".reload");
-    const a = L.address;
-    dom.omni = el("div", "omnibox", toolbar);
-    Object.assign(dom.omni.style, { left: `${a.x - w.x}px`, top: `${a.y - w.y - L.tabstrip_h}px`, width: `${a.w}px`, height: `${a.h}px` });
-    dom.omniLead = el("span", "", dom.omni);
-    dom.omniText = el("div", "text", dom.omni);
-    dom.omniStar = el("span", "", dom.omni);
-    dom.suggest = el("div", "suggest", dom.omni);
-    const exts = ["#7b8cff", "#ffb347", "#55c2a8", "#e86a6a", "#9aa3b5"];
-    el("div", "tools", toolbar,
-      exts.map((c) => `<i class="ext" style="background:${c};opacity:.85"></i>`).join("") +
-      '<svg viewBox="0 0 24 24"><path d="M10 4h4v3a2 2 0 1 0 4 0V4h2v6h-3a2 2 0 1 0 0 4h3v6h-6v-3a2 2 0 1 0-4 0v3H4v-6h3a2 2 0 1 0 0-4H4V4h6Z"/></svg>' +
-      '<span class="avatar"></span><svg viewBox="0 0 24 24"><circle cx="12" cy="5.5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="18.5" r="1.3"/></svg>');
-
-    // bookmarks bar
-    const folder = '<svg viewBox="0 0 24 24"><path d="M3 6h7l2 2.5h9V19H3Z"/></svg>';
-    const bm = el("div", "bookmarks", win,
-      '<span class="bm"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg></span>' +
-      [["#14a800", "Upwork"], ["#ea4335", "Inbox"], ["#7b68ee", "Client projects"], ["#2684ff", "Proposals"], ["#f4b400", "Invoices"], ["#34a853", "Docs"]]
-        .map(([c, t]) => `<span class="bm"><i style="background:${c}"></i>${esc(t)}</span>`).join("") +
-      `<span class="bm">${folder}Useful tools</span><span class="bm right">${folder}All Bookmarks</span>`);
-    Object.assign(bm.style, { top: `${L.tabstrip_h + L.toolbar_h}px`, height: `${L.bookmarks_h}px` });
-
-    const content = el("div", "content", win);
-    content.style.top = `${L.tabstrip_h + L.toolbar_h + L.bookmarks_h}px`;
     const loads = [];
-    for (const [id, page] of Object.entries(scene.pages)) {
-      let root;
-      if (page.status === "start") {
-        root = el("div", "page start", content,
-          `<div class="box">${ICON.search.replace('class="lead" ', "")}Search or type a URL</div>` +
-          '<div class="tiles">' + [["U", "Upwork", "#14a800"], ["M", "Inbox", "#c5221f"], ["P", "Projects", "#5b4bd6"], ["D", "Docs", "#1a73e8"], ["C", "Calendar", "#0b8043"], ["+", "Add shortcut", "#4a4953"]]
-            .map(([l, t, c]) => `<div class="tile"><i style="background:${c}">${l}</i>${t}</div>`).join("") + "</div>");
-      } else if (page.image) {
-        root = el("div", "page", content);
-        const img = el("img", "", root);
-        img.alt = "";
-        img.src = ASSETS + page.image;
-        loads.push(img.decode().catch(() => {}));
-        dom.pages[id] = { root, img };
-      } else {
-        const host = splitUrl(page.url).host || "This site";
-        root = el("div", "page placeholder-page", content,
-          `<div class="card"><svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#b9b7c2" stroke-width="1.5"><path d="M4 5h16v12H4ZM8 21h8M12 17v4"/><path d="m9 9 6 4M15 9l-6 4"/></svg>` +
-          `<b>This site can’t be reached</b><span>${esc(host)} took too long to respond.</span></div>`);
-      }
-      dom.pages[id] = dom.pages[id] || { root };
+    for (const win of S.windows) buildWindow(win, camera, loads);
+
+    // tabs live in their window's strip
+    for (const t of S.tabs) {
+      const w = dom.windows[t.win];
+      const root = el("div", "tab", w.strip,
+        '<span class="clip"><span class="fav globe"></span><span class="title"></span></span>' + ICON.x + '<span class="sep"></span>');
+      Object.assign(root.style, { top: `${L.tab.top}px`, height: `${L.tabstrip_h - L.tab.top}px`, display: "none" });
+      dom.tabs[t.id] = { root, clip: root.querySelector(".clip"), fav: root.querySelector(".fav"), title: root.querySelector(".title"),
+        x: root.querySelector(".x"), sep: root.querySelector(".sep"), favKey: null, win: t.win };
+    }
+    for (const page of Object.values(S.pages)) {
       if (page.favicon) {
         const pre = new Image();
         pre.src = ASSETS + page.favicon;
         loads.push(pre.decode().catch(() => {}));
       }
     }
+
+    const d = L.dock;
+    const dock = el("div", "dock", camera);
+    DOCK_APPS.forEach((app, i) => {
+      if (app.sep) {
+        el("div", "sep", dock);
+        return;
+      }
+      const a = el("div", `app${app.run ? " running" : ""}`, dock, app.svg + (app.badge ? `<span class="badge">${app.badge}</span>` : ""));
+      Object.assign(a.style, { width: `${d.icon}px`, height: `${d.icon}px`, marginLeft: i ? `${d.gap}px` : "0" });
+    });
+    Object.assign(dock.style, { height: `${d.h}px`, top: `${d.y}px`, left: "0px" });
+    dock.style.left = `${(W - dock.offsetWidth) / 2}px`;
 
     dom.camera = camera;
     dom.cursor = el("div", "", stage, '<svg viewBox="0 0 24 24"><path d="M5.5 2.8v16.6l4.1-3.9 2.7 6 2.9-1.3-2.7-5.9 5.6-.3Z"/></svg>');
@@ -309,97 +373,132 @@
     return `${DAYS[d.getUTCDay()]} ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}  ${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
   }
 
+  function setFav(tab, key) {
+    if (key === tab.favKey) return;
+    tab.favKey = key;
+    let node;
+    if (key === "spin") {
+      node = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      node.setAttribute("viewBox", "0 0 24 24");
+      node.setAttribute("class", "spin");
+      node.innerHTML = '<circle cx="12" cy="12" r="8"/>';
+    } else if (key === "globe" || key === "newtab") {
+      node = document.createElement("span");
+      node.className = `fav ${key}`;
+    } else {
+      node = document.createElement("img");
+      node.className = "fav";
+      node.src = key;
+    }
+    tab.fav.replaceWith(node);
+    tab.fav = node;
+  }
+
+  function drawOmnibox(w, active, shown, t, opened) {
+    const typing = tr.typing.find((x) => x.tab === active && t >= x.t0 - 90 && t < x.enter);
+    if (typing) {
+      const n = t < typing.t0 ? 0 : Math.round(clamp((t - typing.t0) / (typing.t1 - typing.t0)) * typing.text.length);
+      const typed = typing.text.slice(0, n);
+      const caret = Math.floor(t / 530) % 2 === 0;
+      w.omni.classList.add("focus");
+      w.omni.classList.toggle("open", n > 0);
+      w.omniLead.className = "chip";
+      w.omniLead.innerHTML = ICON.search;
+      w.omniText.innerHTML = `<span class="host">${esc(typed)}</span>${caret ? '<span class="caret"></span>' : ""}`;
+      w.omniEnd.innerHTML = "";
+      if (n > 0) {
+        const isSearch = typing.kind === "search";
+        w.suggest.innerHTML =
+          `<div class="row sel">${isSearch ? ICON.search : ICON.globe}<span>${esc(typed)}</span><span class="muted">${isSearch ? "– Search" : ""}</span></div>` +
+          (isSearch ? `<div class="row">${ICON.search}<span>${esc(typed)} <span class="muted">near me</span></span></div>` +
+            `<div class="row">${ICON.search}<span>${esc(typed)} <span class="muted">examples</span></span></div>` : "");
+      }
+      return `T${n}${caret ? "|" : ""}`;
+    }
+    w.omni.classList.remove("focus", "open");
+    const page = S.pages[shown.page];
+    if (!page.url) {
+      // a fresh tab or window: Chrome puts the caret in the address bar
+      const caret = Math.floor(t / 530) % 2 === 0 && t - opened > 0 && active !== "t0";
+      w.omniLead.className = "chip";
+      w.omniLead.innerHTML = ICON.search;
+      w.omniText.innerHTML = `${caret ? '<span class="caret"></span>' : ""}<span class="placeholder">Search or type a URL</span>`;
+      if (caret) w.omni.classList.add("focus");
+      w.omniEnd.innerHTML = ICON.lens;
+      return `P${caret ? "|" : ""}`;
+    }
+    const u = splitUrl(page.url);
+    w.omniLead.className = "chip site";
+    w.omniLead.innerHTML = ICON.tune;
+    w.omniText.innerHTML = `<span class="host">${esc(u.host)}</span><span class="rest">${esc(u.rest)}</span>`;
+    w.omniEnd.innerHTML = ICON.star;
+    return `U${shown.page}`;
+  }
+
   function seek(t) {
     const cam = cameraAt(t);
     dom.camera.style.transform = `translate(${W / 2 - cam.cx * cam.z}px, ${H / 2 - cam.cy * cam.z}px) scale(${cam.z})`;
     const clock = clockText(t);
     dom.clock.textContent = clock;
+    const sig = [cam.z.toFixed(4), cam.cx.toFixed(1), cam.cy.toFixed(1), clock];
 
-    const opened = tr.tabs.filter((x) => x.t <= t).map((x) => x.id);
-    const active = (lastAt(tr.active, t) || { id: "t0" }).id;
+    // window stacking: most recently focused on top
+    const frontEvents = tr.front.filter((x) => x.t <= t);
+    const front = frontEvents.length ? frontEvents[frontEvents.length - 1].id : "w0";
+    const lastFocus = {};
+    frontEvents.forEach((x, i) => (lastFocus[x.id] = i));
     const loads = tr.loading.filter((x) => t >= x.t0 && t < x.t1);
     const spin = Math.round(((t * 0.4) % 360) / 15) * 15;
-    for (const [id, tab] of Object.entries(dom.tabs)) {
-      const isOpen = opened.includes(id);
-      tab.root.classList.toggle("open", isOpen);
-      tab.root.classList.toggle("active", id === active);
+
+    for (const win of S.windows) {
+      const w = dom.windows[win.id];
+      const openEv = tr.windows.find((x) => x.id === win.id);
+      const isOpen = openEv && openEv.t <= t;
+      w.root.style.display = isOpen ? "block" : "none";
       if (!isOpen) continue;
-      const page = S.pages[pageOf(id, t).page];
-      tab.title.textContent = page.title || splitUrl(page.url).host || "New Tab";
-      const loading = loads.some((x) => x.tab === id);
-      const key = loading ? "spin" : page.favicon ? ASSETS + page.favicon : "globe";
-      if (key !== tab.favKey) {
-        tab.favKey = key;
-        let node;
-        if (key === "spin") {
-          node = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-          node.setAttribute("viewBox", "0 0 24 24");
-          node.setAttribute("class", "spin");
-          node.innerHTML = '<circle cx="12" cy="12" r="8"/>';
-        } else if (key === "globe") {
-          node = document.createElement("span");
-          node.className = "fav globe";
-        } else {
-          node = document.createElement("img");
-          node.className = "fav";
-          node.src = key;
-        }
-        tab.fav.replaceWith(node);
-        tab.fav = node;
-      }
-      if (key === "spin") tab.fav.style.transform = `rotate(${spin}deg)`;
-    }
-    const nOpen = opened.length;
-    dom.plus.style.left = `${L.tabs.x - L.window.x + nOpen * (L.tabs.w + 4) + 4}px`;
+      const q = easeOutCubic(clamp((t - openEv.t) / WINDOW_OPEN_MS));
+      w.root.style.zIndex = String(10 + (lastFocus[win.id] ?? 0));
+      w.root.style.opacity = openEv.t > 0 ? q.toFixed(3) : "1";
+      w.root.style.transform = openEv.t > 0 && q < 1 ? `scale(${(0.94 + 0.06 * q).toFixed(4)})` : "";
+      w.root.classList.toggle("inactive", win.id !== front);
 
-    const shown = pageOf(active, t);
-    const scroll = scrollOf(active, shown, t);
-    for (const [id, p] of Object.entries(dom.pages)) p.root.classList.toggle("show", id === shown.page);
-    const pageDom = dom.pages[shown.page];
-    if (pageDom && pageDom.img) pageDom.img.style.transform = `translateY(${-Math.round(scroll)}px)`;
+      // tabs of this window, sliding open left to right
+      const tabsHere = tr.tabs.filter((x) => x.win === win.id && x.t <= t);
+      const activeEv = lastAt(tr.active.filter((x) => x.win === win.id), t);
+      const active = activeEv ? activeEv.id : tabsHere[0].id;
+      let x = L.tab.left;
+      tabsHere.forEach((ev, i) => {
+        const tab = dom.tabs[ev.id];
+        const grow = ev.t > 0 ? easeOutCubic(clamp((t - ev.t) / TAB_OPEN_MS)) : 1;
+        const width = L.tab.w * grow;
+        Object.assign(tab.root.style, { display: "flex", left: `${x}px`, width: `${width}px` });
+        tab.clip.style.opacity = grow < 0.6 ? "0" : String((grow - 0.6) / 0.4);
+        tab.x.style.opacity = grow < 0.9 ? "0" : "1";
+        tab.root.classList.toggle("active", ev.id === active);
+        const next = tabsHere[i + 1];
+        tab.sep.style.display = ev.id !== active && (!next || next.id !== active) ? "block" : "none";
+        const page = S.pages[pageOf(ev.id, t).page];
+        tab.title.textContent = page.title || splitUrl(page.url).host || "New Tab";
+        const loading = loads.some((l) => l.tab === ev.id);
+        setFav(tab, loading ? "spin" : page.favicon ? ASSETS + page.favicon : page.status === "start" ? "newtab" : "globe");
+        if (loading) tab.fav.style.transform = `rotate(${spin}deg)`;
+        x += width + L.tab.gap;
+        sig.push(`${ev.id}:${Math.round(width)}${ev.id === active ? "a" : ""}${loading ? `L${spin}` : ""}${pageOf(ev.id, t).page}`);
+      });
+      w.plus.style.left = `${x + 4}px`;
 
-    const history = (perTab[active] || []).filter((e) => e.t <= t).length;
-    dom.back.classList.toggle("dim", history < 2);
-    const activeLoading = loads.some((x) => x.tab === active);
-    dom.reload.innerHTML = activeLoading ? ICON.stop : ICON.reload;
-
-    // omnibox
-    const typing = tr.typing.find((x) => x.tab === active && t >= x.t0 - 90 && t < x.enter);
-    let omniSig;
-    if (typing) {
-      const n = t < typing.t0 ? 0 : Math.round(clamp((t - typing.t0) / (typing.t1 - typing.t0)) * typing.text.length);
-      const typed = typing.text.slice(0, n);
-      const caret = Math.floor(t / 530) % 2 === 0;
-      dom.omni.classList.add("focus");
-      dom.omni.classList.toggle("open", n > 0);
-      dom.omniLead.innerHTML = ICON.search;
-      dom.omniText.innerHTML = `<span class="host">${esc(typed)}</span>${caret ? '<span class="caret"></span>' : ""}`;
-      dom.omniStar.innerHTML = "";
-      if (n > 0) {
-        const isSearch = typing.kind === "search";
-        dom.suggest.innerHTML =
-          `<div class="row sel">${isSearch ? ICON.search.replace('class="lead" ', "") : ICON.globe}<span>${esc(typed)}</span>` +
-          `<span class="muted">${isSearch ? "– Search" : ""}</span></div>` +
-          (isSearch ? `<div class="row">${ICON.search.replace('class="lead" ', "")}<span>${esc(typed)} <span class="muted">near me</span></span></div>` : "");
-      }
-      omniSig = `T${n}${caret ? "|" : ""}`;
-    } else {
-      dom.omni.classList.remove("focus", "open");
-      const page = S.pages[shown.page];
-      if (!page.url) {
-        // a fresh tab: Chrome puts the caret in the address bar
-        const caret = Math.floor(t / 530) % 2 === 0 && opened.length > 1 && active !== "t0";
-        dom.omniLead.innerHTML = ICON.search;
-        dom.omniText.innerHTML = `<span class="placeholder">Search or type a URL</span>`;
-        dom.omniStar.innerHTML = "";
-        omniSig = `P${caret ? "|" : ""}`;
-      } else {
-        const u = splitUrl(page.url);
-        dom.omniLead.innerHTML = ICON.tune;
-        dom.omniText.innerHTML = `<span class="host">${esc(u.host)}</span><span class="rest">${esc(u.rest)}</span>`;
-        dom.omniStar.innerHTML = ICON.star;
-        omniSig = `U${shown.page}`;
-      }
+      const shown = pageOf(active, t);
+      const scroll = scrollOf(active, shown, t);
+      for (const [id, p] of Object.entries(w.pages)) p.root.classList.toggle("show", id === shown.page);
+      const pageDom = w.pages[shown.page];
+      if (pageDom && pageDom.img) pageDom.img.style.transform = `translateY(${-Math.round(scroll)}px)`;
+      const history = (perTab[active] || []).filter((e) => e.t <= t).length;
+      w.back.classList.toggle("dim", history < 2);
+      const activeLoading = loads.some((l) => l.tab === active);
+      w.reload.innerHTML = activeLoading ? ICON.stop : ICON.reload;
+      const opened = (tabsHere.find((e) => e.id === active) || { t: 0 }).t;
+      const omniSig = win.id === front ? drawOmnibox(w, active, shown, t, opened) : drawOmnibox(w, active, shown, -1e9, opened);
+      sig.push(`${win.id}${win.id === front ? "*" : ""}${q.toFixed(3)}:${shown.page}:${Math.round(scroll)}:${omniSig}:${history}:${activeLoading}`);
     }
 
     // pointer, in screen space: always on screen, no click effects
@@ -408,12 +507,8 @@
     const vis = clamp((t - S.cursor.in) / 260) * clamp((S.cursor.out - t) / 260);
     dom.cursor.style.opacity = vis;
     dom.cursor.style.transform = `translate(${sx - 5.5}px, ${sy - 2.8}px)`;
-
-    return [
-      cam.z.toFixed(4), cam.cx.toFixed(1), cam.cy.toFixed(1), nOpen, active, shown.page, Math.round(scroll),
-      omniSig, activeLoading ? `L${spin}` : "", loads.map((x) => x.tab).join(""), history, clock,
-      sx.toFixed(1), sy.toFixed(1), vis.toFixed(2),
-    ].join(",");
+    sig.push(sx.toFixed(1), sy.toFixed(1), vis.toFixed(2));
+    return sig.join(",");
   }
 
   /* ── boot ─────────────────────────────────────────────────────────────── */

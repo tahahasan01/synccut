@@ -11,6 +11,8 @@ const TYPES: { id: ActionType; label: string; field: "url" | "query" | "target" 
   { id: "click", label: "Click", field: "target", placeholder: "link text, or “first result”" },
   { id: "new_tab", label: "Open a new tab", field: null },
   { id: "switch_tab", label: "Switch tab", field: "tab" },
+  { id: "new_window", label: "Open a new window", field: null },
+  { id: "switch_window", label: "Switch window", field: "tab" },
   { id: "back", label: "Go back", field: null },
 ];
 
@@ -19,7 +21,9 @@ const ISSUE_TEXT: Record<string, { text: string; tone: "warn" | "bad" | "neutral
   target_not_found: { text: "That link wasn't found on the page", tone: "bad" },
   not_a_link: { text: "That target isn't a link", tone: "warn" },
   scroll_text_not_found: { text: "Text not found, so it scrolls down instead", tone: "warn" },
-  no_such_tab: { text: "There's no tab with that number", tone: "bad" },
+  no_such_tab: { text: "There's no tab with that number in this window", tone: "bad" },
+  no_such_window: { text: "There's no window with that number", tone: "bad" },
+  too_many_windows: { text: "Up to 3 windows can be open", tone: "warn" },
   nothing_to_go_back_to: { text: "There's no earlier page to go back to", tone: "warn" },
   late: { text: "Starts late because the previous cue is still playing", tone: "warn" },
   not_captured: { text: "Not captured yet", tone: "warn" },
@@ -37,6 +41,8 @@ function cueText(a: Action): string {
     case "click": return `click “${a.target}”`;
     case "new_tab": return "open a new tab";
     case "switch_tab": return a.tab < 0 ? "switch to the previous tab" : `switch to tab ${a.tab + 1}`;
+    case "new_window": return "open a new window";
+    case "switch_window": return a.tab < 0 ? "switch to the other window" : `switch to window ${a.tab + 1}`;
     case "back": return "go back";
   }
 }
@@ -379,10 +385,19 @@ function CueEditor({
         </label>
         {spec.field === "tab" ? (
           <label className="block">
-            <span className="mb-1.5 block text-sm font-semibold">Which tab</span>
+            <span className="mb-1.5 block text-sm font-semibold">{action.type === "switch_window" ? "Which window" : "Which tab"}</span>
             <select className={inputClass} value={action.tab} onChange={(e) => onChange({ tab: Number(e.target.value) })}>
-              <option value={-1}>The previous tab</option>
-              {[0, 1, 2, 3].map((n) => <option key={n} value={n}>Tab {n + 1}</option>)}
+              {action.type === "switch_window" ? (
+                <>
+                  <option value={-1}>The other window</option>
+                  {[0, 1, 2].map((n) => <option key={n} value={n}>Window {n + 1}</option>)}
+                </>
+              ) : (
+                <>
+                  <option value={-1}>The previous tab</option>
+                  {[0, 1, 2, 3].map((n) => <option key={n} value={n}>Tab {n + 1}</option>)}
+                </>
+              )}
             </select>
           </label>
         ) : spec.field ? (

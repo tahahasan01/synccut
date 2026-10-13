@@ -48,14 +48,17 @@ describes or clearly implies ("here's your job post" right after mentioning Upwo
 do not invent extra steps. For each action:
 
 - word_index: the index of the word where the action should start (usually the verb, e.g. "open", "search", "scroll").
-- type: navigate | search | scroll | click | new_tab | switch_tab | back
+- type: navigate | search | scroll | click | new_tab | switch_tab | new_window | switch_window | back
+  (new_window only when they say "window"; a tab is a tab. At most 3 windows.)
 - url: for navigate, a full https URL of a real public page. Use the site's main URL unless the speaker names
   a specific page. Leave "" for other types.
 - query: for search, the exact search text. "" otherwise.
 - target: for scroll: "down", "up", "bottom", "top", or a short phrase of text on the page to scroll to
   (e.g. "requirements"). For click: the visible link or button text, or "first result" / "second result".
   "" otherwise.
-- tab: for switch_tab, the 0-based tab index, or -1 for "the previous tab". 0 otherwise.
+- tab: for switch_tab, the 0-based tab index within the current window, or -1 for "the previous tab".
+  For switch_window, the 0-based window index (0 = the first window), or -1 for "the other/previous window".
+  0 otherwise.
 - spoken: the few words that trigger the action, copied from the narration.
 
 {page}Narration:

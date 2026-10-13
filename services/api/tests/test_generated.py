@@ -107,3 +107,39 @@ def test_linked_page_mentioned_early_is_open_from_the_first_frame():
     capture = {"pages": CAPTURE["pages"], "results": {actions[0]["id"]: {"flags": [], "page": "p1"}}}
     assert build_scene(actions, capture, 15_000, opening_url=job)["tracks"]["tab_page"][0]["page"] == "p1"
     assert build_scene(actions, capture, 15_000)["tracks"]["typing"]  # without the link it is typed in as said
+
+
+def test_new_window_and_switching_back():
+    from synccut.core.actions import plan_with_rules
+    from synccut.core.scene import window_rect
+
+    words = [{"w": w, "start_ms": i * 400.0, "end_ms": i * 400.0 + 350} for i, w in enumerate(
+        "First I open a new window then go to hubspot.com and now switch back to the first window".split())]
+    plan = validate_actions(plan_with_rules(words), 20_000)
+    assert [a["type"] for a in plan] == ["new_window", "navigate", "switch_window"]
+    assert plan[2]["tab"] == 0
+
+    capture = {"pages": {"p1": {"id": "p1", "url": "https://hubspot.com/", "title": "HubSpot", "image": "pages/p1.jpg",
+                                "height": 900, "status": "ok", "favicon": None}},
+               "results": {plan[1]["id"]: {"flags": [], "page": "p1"}}}
+    scene = build_scene(plan, capture, 20_000)
+    tr = scene["tracks"]
+    assert [w["id"] for w in scene["windows"]] == ["w0", "w1"]
+    assert [f["id"] for f in tr["front"]] == ["w0", "w1", "w0"]
+    assert {t["id"]: t["win"] for t in scene["tabs"]} == {"t0": "w0", "t1": "w1"}
+    assert tr["typing"][0]["tab"] == "t1"  # hubspot is typed into the new window's tab
+    # opening a window is ⌘N (no pointer travel), but switching back clicks a visible part of window 0
+    click = tr["presses"][-1]
+    w0, w1 = window_rect(0), window_rect(1)
+    inside = lambda r: r["x"] <= click["x"] <= r["x"] + r["w"] and r["y"] <= click["y"] <= r["y"] + r["h"]  # noqa: E731
+    assert inside(w0) and not inside(w1)
+    assert scene["issues"] == [] or all("rules_guess" in i["flags"] for i in scene["issues"])
+
+
+def test_tabs_are_counted_per_window():
+    actions = validate_actions([
+        {"type": "new_tab", "at_ms": 1000}, {"type": "new_window", "at_ms": 3000},
+        {"type": "switch_tab", "at_ms": 5000, "tab": 1},  # only one tab in the new window
+    ], 10_000)
+    scene = build_scene(actions, {"pages": {}, "results": {}}, 10_000)
+    assert any("no_such_tab" in i["flags"] for i in scene["issues"])
