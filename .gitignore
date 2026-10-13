@@ -18,3 +18,6 @@ apps/web/next-env.d.ts
 
 # browser test artifacts
 .playwright-mcp/
+
+.vercel
+.env*
